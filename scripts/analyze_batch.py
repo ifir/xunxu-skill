@@ -23,14 +23,26 @@ DOCUMENT_SUFFIXES = {
 }
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff", ".bmp", ".heic", ".heif", ".avif"}
 AUDIO_VIDEO_SUFFIXES = {".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".amr", ".ape", ".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".wmv", ".flv", ".mts", ".m2ts"}
+VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".wmv", ".flv", ".mts", ".m2ts"}
 
 def _document_job(path: str, max_chars: int, max_pages: int) -> dict[str, Any]:
     return extract_text(Path(path), max_chars, max_pages)
 
-def _media_job(path: Path, kind: str, max_chars: int, model: str, max_seconds: float) -> dict[str, Any]:
+def _media_job(path: Path, kind: str, max_chars: int, model: str, max_seconds: float, frame_dir: Path | None = None) -> dict[str, Any]:
     if kind == "image":
         from ocr_image import extract_text as ocr
         result = ocr(path)
+    elif kind == "video":
+        from transcribe_media import transcribe
+        transcription = transcribe(path, model, None, max_seconds)
+        if transcription.get("method") == "transcription" and str(transcription.get("text") or "").strip() and not transcription.get("error"):
+            result = transcription
+        else:
+            from extract_keyframes import extract
+            keyframes = extract(path, frame_dir or path.parent / ".cache" / "keyframes")
+            keyframes["fallback_reason"] = transcription.get("error") or "音轨没有可用语音文本"
+            keyframes["transcription_method"] = transcription.get("method")
+            result = keyframes
     else:
         from transcribe_media import transcribe
         result = transcribe(path, model, None, max_seconds)
@@ -45,7 +57,7 @@ def _record(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         "method": result.get("method"), "text": result.get("text", ""),
         "error": result.get("error"), "extracted_at": now_iso(),
     }
-    for key in ("sample_strategy", "sampled_pages", "truncated"):
+    for key in ("sample_strategy", "sampled_pages", "truncated", "frames", "duration_seconds", "requires_agent_vision", "fallback_reason", "transcription_method", "requires_user_confirmation", "tools"):
         if key in result:
             record[key] = result[key]
     return record
@@ -90,7 +102,7 @@ def analyze_jobs(root: Path, run: Path, workers: int, max_chars: int, max_pages:
         elif suffix in AUDIO_VIDEO_SUFFIXES:
             media_candidates.append(path)
             if include_media:
-                media.append((job, path, "audio-video"))
+                media.append((job, path, "video" if suffix in VIDEO_SUFFIXES else "audio"))
         else:
             atomic_json(evidence_dir / f"{job['fingerprint']}.json", _record(job, {"method": "unavailable", "text": "", "error": "批处理器不支持该格式"}))
             unavailable += 1
@@ -116,16 +128,23 @@ def analyze_jobs(root: Path, run: Path, workers: int, max_chars: int, max_pages:
     # OCR and Whisper are deliberately serialized: loading several large models
     # usually makes a batch slower and can exhaust memory. Document extraction
     # still uses the full bounded process pool above.
+    blocked = []
     for job, path, kind in media:
-        result = _media_job(path, kind, max_chars, model, max_seconds)
+        frame_dir = run / "keyframes" / str(job["fingerprint"]) if kind == "video" else None
+        result = _media_job(path, kind, max_chars, model, max_seconds, frame_dir)
+        if result.get("method") == "installation-required":
+            blocked.append({"source": job.get("source"), "reason": result.get("error"), "tools": result.get("tools", [])})
+            continue
         record = _record(job, result)
         if job.get("cache_status") == "modified": _attach_diff(root, job, record)
         atomic_json(evidence_dir / f"{job['fingerprint']}.json", record)
         completed += 1
+    if blocked:
+        return {"run_id": run.name, "status": "installation-required", "blocked": blocked, "message": "音轨转写没有得到证据，且关键帧兜底工具缺失。必须询问用户是否安装 FFmpeg，不能完成视频意图识别或进入移动确认。"}
     items = []
     for path in sorted(evidence_dir.glob("*.json")):
         item = read_json(path, {})
-        items.append({"fingerprint": item.get("fingerprint"), "source": item.get("source"), "method": item.get("method"), "characters": len(str(item.get("text") or "")), "evidence": path.name, "error": item.get("error")})
+        items.append({"fingerprint": item.get("fingerprint"), "source": item.get("source"), "method": item.get("method"), "characters": len(str(item.get("text") or "")), "frames": len(item.get("frames") or []), "requires_agent_vision": bool(item.get("requires_agent_vision")), "evidence": path.name, "error": item.get("error")})
     index = {"version": 1, "run_id": run.name, "updated_at": now_iso(), "max_characters_per_file": max_chars, "items": items}
     atomic_json(run / "evidence-index.json", index)
     return {"run_id": run.name, "status": "completed", "workers": workers, "new_evidence": completed, "unavailable": unavailable, "total_evidence": len(items), "index": str(run / "evidence-index.json")}

@@ -31,7 +31,7 @@ EXT_MAP = {f".{suffix}": category for category, values in EXTENSIONS.items() for
 DOC_AMBIGUOUS = {".md", ".markdown", ".rst", ".adoc", ".asciidoc"}
 CONFIG_AMBIGUOUS = {".json", ".jsonc", ".json5", ".yaml", ".yml", ".toml", ".xml", ".ini", ".cfg", ".conf", ".properties", ".env", ".lock", ".rc"}
 SPECIAL_CODE_NAMES = {"makefile", "cmakelists.txt", "dockerfile", "containerfile", "jenkinsfile", "vagrantfile", "gemfile", "rakefile", "procfile", "justfile", "tiltfile", "brewfile", "podfile", "cartfile", "build", "workspace", "module.bazel", "meson.build", "package.json", "tsconfig.json", "jsconfig.json", "pom.xml", "build.xml", "composer.json", "requirements.txt", "pipfile", "pyproject.toml", "cargo.toml", "cargo.lock", "go.mod", "go.sum", "docker-compose.yml", "compose.yml", "taskfile.yml", "taskfile.yaml", "editorconfig", "gitignore", "gitattributes", "gitmodules", "dockerignore", "npmrc", "yarnrc"}
-GENERATED = {".organizer.plan.json", ".organizer.config.json", ".organizer.state.json", ".organizer.intent.json", ".organizer.analysis-required.json", ".organizer.raw-analysis.json", "organizer.report.html", "organizer.change.md", "index-catch.md", "file2intent.md", "网页可视化目录.sh"}
+GENERATED = {".organizer.plan.json", ".organizer.config.json", ".organizer.state.json", ".organizer.intent.json", ".organizer.analysis-required.json", ".organizer.dependencies.json", ".organizer.raw-analysis.json", "organizer.report.html", "organizer.change.md", "index-catch.md", "file2intent.md", "网页可视化目录.sh"}
 INCOMPLETE = {".crdownload", ".part", ".download"}
 WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 CODE_MARKERS = ("#!/", "import ", "function ", "class ", "const ", "let ", "def ", "package ", "dependencies", "devdependencies", "compileroptions", "<project", "services:", "apiversion:", "resource ")
@@ -353,9 +353,16 @@ def make_plan(root: Path, plan_path: Path, min_age: int) -> dict[str, Any]:
                 continue
             status = "analysis-required" if needs_analysis else ("conflict" if destination.exists() else "planned")
             folder_renames.append({"source": relative(folder, root), "destination": relative(destination, root), "original_name": folder.name, "new_name": new_name, "renamed": True, "reason": f"文件夹意图：{cached.get('intent', '')}" if isinstance(cached, dict) else "等待文件夹意图识别", "status": status, "fingerprint": fp})
-    data = {"version": 2, "root": str(root), "created_at": current.isoformat(timespec="seconds"), "config_digest": config_digest(config), "config": config, "min_age_seconds": min_age, "analysis_required": analysis, "moves": moves, "folder_renames": folder_renames, "skipped": skipped}
+    analysis_paths = [root / item["source"] for item in analysis if item.get("kind") == "file" and item.get("method_required") == "content"]
+    if analysis_paths:
+        from check_capabilities import assess_plan
+        dependency_assessment = assess_plan(analysis_paths)
+    else:
+        dependency_assessment = {"status": "not-needed", "analysis_files": 0, "requirements_file": "requirements.txt", "requirements_status": "not-needed", "required_packages": [], "conditional_packages": [], "authorization_required": False, "reasons": ["本次没有需要内容识别的文件"]}
+    data = {"version": 3, "root": str(root), "created_at": current.isoformat(timespec="seconds"), "config_digest": config_digest(config), "config": config, "min_age_seconds": min_age, "dependency_assessment": dependency_assessment, "analysis_required": analysis, "moves": moves, "folder_renames": folder_renames, "skipped": skipped}
     write_json(plan_path, data)
     write_json(cache_path(root, ".organizer.analysis-required.json"), {"version": 1, "created_at": data["created_at"], "root": str(root), "items": analysis})
+    write_json(cache_path(root, ".organizer.dependencies.json"), {"version": 1, "created_at": data["created_at"], "root": str(root), **dependency_assessment})
     return data
 
 def safe_path(root: Path, value: str) -> Path:

@@ -1,12 +1,12 @@
 # 循序（Xunxu）测试报告
 
-- 时间：2026-09-28T15:37:47+08:00
+- 时间：2026-09-28T16:57:38+08:00
 - 结果：通过
-- 总数：30
-- 通过：30
+- 总数：34
+- 通过：34
 - 失败：0
 - 跳过：0
-- 耗时：0.526 秒
+- 耗时：0.518 秒
 
 ## 用例
 
@@ -15,6 +15,7 @@
 | passed | test_all_eleven_categories (__main__.ClassificationTests) |
 | passed | test_ambiguous_and_special_code (__main__.ClassificationTests) |
 | passed | test_distrust_uses_meaningful_name_as_targeted_hint (__main__.ConfigurationAndNamingTests) |
+| passed | test_no_content_analysis_means_requirements_not_needed (__main__.ConfigurationAndNamingTests) |
 | passed | test_rename_format_and_group_limit (__main__.ConfigurationAndNamingTests) |
 | passed | test_trust_name_policy (__main__.ConfigurationAndNamingTests) |
 | passed | test_config_change_after_plan_rejected (__main__.ExecutionSafetyTests) |
@@ -39,9 +40,12 @@
 | passed | test_stale_running_lease_is_recovered (__main__.QueueTests) |
 | passed | test_batch_stops_for_media_authorization_instead_of_unavailable_fallback (__main__.ReportAndMediaTests) |
 | passed | test_installers_and_archives_never_request_analysis (__main__.ReportAndMediaTests) |
+| passed | test_keyframe_capability_is_valid_video_fallback (__main__.ReportAndMediaTests) |
 | passed | test_media_dependency_absence_is_safe_or_analyzer_returns_structure (__main__.ReportAndMediaTests) |
 | passed | test_missing_video_tool_requires_installation_authorization (__main__.ReportAndMediaTests) |
+| passed | test_plan_assessment_installs_only_required_package (__main__.ReportAndMediaTests) |
 | passed | test_static_report_file_details (__main__.ReportAndMediaTests) |
+| passed | test_video_falls_back_to_distributed_keyframes (__main__.ReportAndMediaTests) |
 
 ## 边界说明
 

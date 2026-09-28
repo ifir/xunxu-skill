@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-28T15:37:47+08:00",
-  "elapsed_seconds": 0.526,
-  "total": 30,
+  "generated_at": "2026-09-28T16:57:38+08:00",
+  "elapsed_seconds": 0.518,
+  "total": 34,
   "counts": {
-    "passed": 30,
+    "passed": 34,
     "failed": 0,
     "error": 0,
     "skipped": 0
@@ -22,6 +22,11 @@
     },
     {
       "name": "test_distrust_uses_meaningful_name_as_targeted_hint (__main__.ConfigurationAndNamingTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_no_content_analysis_means_requirements_not_needed (__main__.ConfigurationAndNamingTests)",
       "status": "passed",
       "detail": ""
     },
@@ -146,6 +151,11 @@
       "detail": ""
     },
     {
+      "name": "test_keyframe_capability_is_valid_video_fallback (__main__.ReportAndMediaTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
       "name": "test_media_dependency_absence_is_safe_or_analyzer_returns_structure (__main__.ReportAndMediaTests)",
       "status": "passed",
       "detail": ""
@@ -156,7 +166,17 @@
       "detail": ""
     },
     {
+      "name": "test_plan_assessment_installs_only_required_package (__main__.ReportAndMediaTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
       "name": "test_static_report_file_details (__main__.ReportAndMediaTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_video_falls_back_to_distributed_keyframes (__main__.ReportAndMediaTests)",
       "status": "passed",
       "detail": ""
     }

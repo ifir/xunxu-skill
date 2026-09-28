@@ -95,6 +95,7 @@
 |---|---|
 | scripts/ocr_image.py | 图片 OCR |
 | scripts/transcribe_media.py | 音频或视频语音转写 |
+| scripts/extract_keyframes.py | 音轨转写失败时均匀提取视频关键帧作为兜底 |
 | scripts/analyze_media.py | 媒体路由及原始结果缓存 |
 | scripts/analyze_document.py | 跨平台提取文本、OOXML、EPUB 和 PDF 文本层 |
 | scripts/analyze_batch.py | 多进程批量提取紧凑证据，正文不输出到终端 |
@@ -103,11 +104,15 @@ PDF、OCR 和音视频转写的可选依赖统一固定在 [requirements.txt](re
 
     python3 -m pip install -r requirements.txt
 
+这不是每次整理都必须执行的安装命令。初步预演会根据本次真正需要内容识别的格式检查当前 Python 和已有工具：不需要时明确跳过；只缺少部分能力时优先请求授权安装固定版本的最小包集合；只有全部依赖都确有必要时才建议安装整个 requirements.txt。任何依赖安装和模型下载都必须先获得用户明确授权。
+
 - PDF 使用 pypdf；纯扫描 PDF 无文本层时仍需额外页面渲染与 OCR，当前会安全降级而不猜测。
 - 如果系统已有 `pdftotext`，PDF 会优先走这个快速路径并写入临时文件；否则回退 pypdf。
 - XLSX 默认只提取工作表名和每表前 20 行、12 列来判断主题，不启动 pandas 全量分析。
 - OCR 使用 paddleocr 3.7.0，还需安装与设备匹配的 PaddlePaddle runtime。
 - 转写使用 faster-whisper 1.2.1，通过 PyAV 解码媒体，不要求系统安装 FFmpeg。
+- 视频按“音轨转写为主、关键帧视觉识别兜底”处理。转写不可用、失败或无有效语音时，通过 FFmpeg 在视频 5%–95% 时间线上默认均匀抽取 5 帧；代理必须综合多帧判断，不能只使用封面或首帧。
+- 关键帧兜底需要 PATH 中存在 ffmpeg 和 ffprobe；若转写与关键帧两条路径都不可用，会先询问是否安装工具。
 - 首次转写通常需要下载模型权重；这是独立网络操作，应由用户明确授权。
 - 发现待识别视频但缺少工具时，代理会先说明需要安装的固定版本依赖及模型下载影响并征求同意；不会直接按 unavailable 跳过识别。用户拒绝安装后，可明确选择保留原名仅分类或暂时跳过。
 
@@ -154,6 +159,7 @@ PDF、OCR 和音视频转写的可选依赖统一固定在 [requirements.txt](re
 | scripts/run_queue.py | 创建、领取、完成、恢复和合并分析任务 |
 | scripts/ocr_image.py | 本地图片 OCR |
 | scripts/transcribe_media.py | 本地音视频语音转写 |
+| scripts/extract_keyframes.py | 视频关键帧兜底提取 |
 | scripts/analyze_media.py | 媒体分析入口及缓存 |
 | scripts/common.py | 文件指纹、时间及 JSON 公共逻辑 |
 | scripts/install.py | Codex、Claude Code 与自定义目标安装 |

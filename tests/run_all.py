@@ -24,6 +24,7 @@ import analyze_media
 import analyze_document
 import analyze_batch
 import check_capabilities
+import extract_keyframes
 import install as skill_install
 import organizer
 import run_queue
@@ -85,6 +86,15 @@ class ConfigurationAndNamingTests(Base):
         analysis = {item["source"]: item for item in data["analysis_required"]}
         self.assertNotIn("quarterly-report.txt", analysis)
         self.assertEqual(analysis["a1b2c3d4e5f60718.txt"]["analysis_depth"], "full")
+        self.assertIn("dependency_assessment", data)
+        self.assertFalse(data["dependency_assessment"]["authorization_required"])
+        self.assertTrue(organizer.cache_path(self.root, ".organizer.dependencies.json").is_file())
+
+    def test_no_content_analysis_means_requirements_not_needed(self) -> None:
+        write(self.root / "meaningful-report.txt", "report evidence")
+        configure(self.root, rename=True, trust=True); data = plan(self.root)
+        self.assertEqual(data["analysis_required"], [])
+        self.assertEqual(data["dependency_assessment"]["requirements_status"], "not-needed")
 
     def test_distrust_uses_meaningful_name_as_targeted_hint(self) -> None:
         write(self.root / "quarterly-report.txt", "report evidence")
@@ -252,6 +262,34 @@ class ReportAndMediaTests(Base):
         self.assertEqual(capability["status"], "installation-required")
         self.assertTrue(capability["requires_user_confirmation"]); self.assertIn("faster-whisper==1.2.1", capability["packages"])
         self.assertIn("pip install faster-whisper==1.2.1", capability["install_commands"]["macos_linux"])
+
+    def test_plan_assessment_installs_only_required_package(self) -> None:
+        audio = write(self.root / "recording.mp3", b"audio")
+        def module(name): return False
+        with mock.patch.object(check_capabilities, "_module", side_effect=module), mock.patch.object(check_capabilities.shutil, "which", return_value=None):
+            assessment = check_capabilities.assess_plan([audio])
+        self.assertEqual(assessment["requirements_status"], "minimal-install-required")
+        self.assertEqual(assessment["required_packages"], ["faster-whisper==1.2.1"])
+        self.assertNotIn("-r requirements.txt", assessment["minimal_install_command"])
+        self.assertTrue(assessment["authorization_required"])
+
+    def test_keyframe_capability_is_valid_video_fallback(self) -> None:
+        video = write(self.root / "fallback.mp4", b"video")
+        def which(name): return f"/tools/{name}" if name in {"ffmpeg", "ffprobe"} else None
+        with mock.patch.object(check_capabilities, "_module", return_value=False), mock.patch.object(check_capabilities.shutil, "which", side_effect=which):
+            capability = check_capabilities.check([video])
+        self.assertEqual(capability["status"], "ready")
+        self.assertFalse(capability["video_pipeline"]["primary_ready"]); self.assertTrue(capability["video_pipeline"]["fallback_ready"])
+        self.assertTrue(capability["video_pipeline"]["usable"])
+
+    def test_video_falls_back_to_distributed_keyframes(self) -> None:
+        video = write(self.root / "silent.mp4", b"video")
+        frames = {"method": "keyframes", "frames": [{"path": "f1.jpg", "time_seconds": 1.0}], "requires_agent_vision": True, "error": None}
+        with mock.patch("transcribe_media.transcribe", return_value={"method": "transcription", "text": "", "error": None}), mock.patch("extract_keyframes.extract", return_value=frames):
+            result = analyze_batch._media_job(video, "video", 1000, "small", 10, self.root / "frames")
+        self.assertEqual(result["method"], "keyframes"); self.assertTrue(result["requires_agent_vision"]); self.assertIn("语音文本", result["fallback_reason"])
+        times = extract_keyframes.sample_times(100, 5)
+        self.assertEqual(times, [5.0, 27.5, 50.0, 72.5, 95.0])
 
     def test_batch_stops_for_media_authorization_instead_of_unavailable_fallback(self) -> None:
         video = write(self.root / "abcdef1234567890.mp4", b"not real video")
