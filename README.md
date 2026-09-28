@@ -1,6 +1,6 @@
 # 循序（Xunxu）
 
-循序是一个用于整理杂乱下载目录和文件收集目录的 Codex Skill。它根据文件名、扩展名、真实格式、元数据及必要的本地内容分析，把散落文件归入清晰目录；在用户授权时，还可生成语义化文件名和二级意图目录。
+循序是一个可移植的 Agent Skill，用于在 macOS 和 Windows 整理杂乱下载目录与文件收集目录。它根据文件名、扩展名、真实格式、元数据及必要的本地内容分析，把散落文件归入清晰目录；在用户授权时，还可生成语义化文件名和二级意图目录。
 
 > 核心安全边界：循序只移动或重命名文件，绝不删除、覆盖、清空或修改文件内容。实际移动前必须展示预演并取得明确确认。
 
@@ -11,6 +11,7 @@
 - 对名称含义不清的图片使用视觉理解/OCR，对音视频按需使用元数据、关键帧或语音转写。
 - 生成 YYMMDD-意图摘要.原扩展名 格式的新名称，并创建不超过 8 个字符的二级意图目录。
 - 使用磁盘任务队列保存分析进度，可在任务中断或上下文压缩后恢复。
+- 用有界多进程并行提取文档证据，正文落盘、终端只返回短索引，减少等待和 token 消耗。
 - 生成追加式整理日志、意图缓存和独立静态 HTML 报告。
 
 ## 分类结构
@@ -28,7 +29,25 @@
 
 完整格式清单见 [references/file-types.md](references/file-types.md)。
 
+## 运行环境
+
+- Python 3.10+。
+- 核心分类、预演、移动、缓存、报告以及 DOCX/PPTX/XLSX/EPUB 文本提取不需要第三方包。
+- macOS 和 Windows 使用相同 Python 脚本；不依赖 Finder、Quick Look、Explorer 或本地 Office。
+- 可选 PDF、OCR、转写依赖需由用户明确安装；首次模型下载也需单独授权。
+
 ## 安装
+
+| 产品 | 个人 Skill 目录 | 调用方式 | 验证状态 |
+|---|---|---|---|
+| Codex | `~/.codex/skills/xunxu` | `$xunxu` 或自然语言触发 | 已适配 |
+| Claude Code | `~/.claude/skills/xunxu` | `/xunxu` | 已按官方 Agent Skills 目录适配 |
+| WorkBuddy | 由具体版本决定 | 由具体版本决定 | 官方本地 Skill 路径尚未核实 |
+| 豆包 | 由具体版本决定 | 由具体版本决定 | 官方本地 Skill 路径尚未核实 |
+
+仓库是标准 `SKILL.md + scripts + references` 布局，核心代码不依赖 Codex SDK。WorkBuddy、豆包等产品若支持读取本地 Agent Skill 且能运行 Python，可用通用安装目标；否则不能仅复制目录就声称原生可用。
+
+### macOS / Linux
 
 通过 SSH 克隆到 Codex Skills 目录：
 
@@ -38,11 +57,27 @@
 
     git clone https://github.com/ifir/xunxu-skill.git ~/.codex/skills/xunxu
 
-重新启动 Codex 或开启新任务后，可以显式调用 xunxu Skill。当前配置也允许在“帮我整理文件”等相关请求中自动触发。
+也可从已克隆仓库安全复制，安装器遇到已存在目标会停止，不覆盖：
+
+    python3 scripts/install.py --product codex --dry-run
+    python3 scripts/install.py --product codex
+    python3 scripts/install.py --product claude
+    python3 scripts/install.py --product generic --destination /实际/Skills/目录/xunxu
+
+### Windows PowerShell
+
+    git clone https://github.com/ifir/xunxu-skill.git "$env:USERPROFILE\xunxu-skill"
+    cd "$env:USERPROFILE\xunxu-skill"
+    py -3 scripts/install.py --product codex --dry-run
+    py -3 scripts/install.py --product codex
+    py -3 scripts/install.py --product claude
+    py -3 scripts/install.py --product generic --destination "C:\实际\Skills\目录\xunxu"
+
+重新启动对应代理或开启新任务后再调用。更详细的平台边界见 [references/platforms.md](references/platforms.md)。
 
 ## 使用方式
 
-在 Codex 中附上或指定目标目录，然后输入“使用 xunxu 帮我整理这个目录”。每次新整理任务都会询问：
+在支持本地 Agent Skill 的代理中附上或指定目标目录，然后输入“使用 xunxu 帮我整理这个目录”（Claude Code 也可输入 `/xunxu`）。每次新整理任务都会询问：
 
 1. 是否允许修改文件或文件夹名称？
 2. 是否允许整理已有文件夹中的文件？
@@ -88,18 +123,23 @@
 
 ## 内容分析
 
-媒体分析是可选能力，默认整理脚本不需要第三方 Python 包。
+内容分析能力按格式渐进启用，默认整理脚本不需要第三方 Python 包。
 
 | 脚本 | 用途 |
 |---|---|
 | scripts/ocr_image.py | 图片 OCR |
 | scripts/transcribe_media.py | 音频或视频语音转写 |
 | scripts/analyze_media.py | 媒体路由及原始结果缓存 |
+| scripts/analyze_document.py | 跨平台提取文本、OOXML、EPUB 和 PDF 文本层 |
+| scripts/analyze_batch.py | 多进程批量提取紧凑证据，正文不输出到终端 |
 
-可选依赖固定在 [requirements-media.txt](requirements-media.txt)：
+PDF、OCR 和音视频转写的可选依赖统一固定在 [requirements.txt](requirements.txt)：
 
-    python3 -m pip install -r requirements-media.txt
+    python3 -m pip install -r requirements.txt
 
+- PDF 使用 pypdf；纯扫描 PDF 无文本层时仍需额外页面渲染与 OCR，当前会安全降级而不猜测。
+- 如果系统已有 `pdftotext`，PDF 会优先走这个快速路径并写入临时文件；否则回退 pypdf。
+- XLSX 默认只提取工作表名和每表前 20 行、12 列来判断主题，不启动 pandas 全量分析。
 - OCR 使用 paddleocr 3.7.0，还需安装与设备匹配的 PaddlePaddle runtime。
 - 转写使用 faster-whisper 1.2.1，通过 PyAV 解码媒体，不要求系统安装 FFmpeg。
 - 首次转写通常需要下载模型权重；这是独立网络操作，应由用户明确授权。
@@ -143,14 +183,17 @@
 | 脚本 | 用途 |
 |---|---|
 | scripts/organizer.py | 配置、预演、移动、改名、报告和状态管理 |
+| scripts/analyze_document.py | 文本、OOXML、EPUB 与 PDF 证据提取 |
+| scripts/analyze_batch.py | 多进程批量证据提取与短索引 |
 | scripts/run_queue.py | 创建、领取、完成、恢复和合并分析任务 |
 | scripts/ocr_image.py | 本地图片 OCR |
 | scripts/transcribe_media.py | 本地音视频语音转写 |
 | scripts/analyze_media.py | 媒体分析入口及缓存 |
 | scripts/common.py | 文件指纹、时间及 JSON 公共逻辑 |
 | scripts/sync_skill.py | 同步安装目录与本仓库 |
+| scripts/install.py | Codex、Claude Code 与自定义目标安装 |
 
-通常应通过 Codex 和 xunxu Skill 使用本项目，不建议绕过 Skill 直接执行移动命令。
+通常应通过支持本地 Agent Skill 的代理使用本项目，不建议绕过 Skill 直接执行移动命令。
 
 ## 开发与同步
 
@@ -173,7 +216,7 @@
 
     python3 tests/run_all.py
 
-默认测试覆盖 11 个分类、名称策略、私密项、路径安全、冲突保护、幂等执行、可恢复队列、静态报告和媒体能力降级。它不会下载模型，也不会操作真实下载目录。
+默认测试覆盖 11 个分类、名称策略、私密项、路径安全、冲突保护、幂等执行、跨平台指纹、文档解析、安装器、可恢复队列、静态报告和媒体能力降级。GitHub Actions 在 macOS 与 Windows 上运行 Python 3.10/3.12 矩阵。测试不会下载模型，也不会操作真实下载目录。
 
 ## 项目结构
 
@@ -182,7 +225,7 @@
     ├── README.md
     ├── agents/openai.yaml
     ├── references/
-    ├── requirements-media.txt
+    ├── requirements.txt
     ├── scripts/
     └── tests/run_all.py
 

@@ -52,7 +52,7 @@ python3 scripts/organizer.py configure --root <目标目录> --allow-rename <yes
 
 ## 执行流程
 
-使用 scripts/organizer.py 维护配置、预演、移动、重命名、报告与整理状态；它无需第三方 Python 依赖。图片 OCR、音频/视频转写及原始分析缓存已拆分到独立脚本，按 [references/intent-analysis.md](references/intent-analysis.md) 路由。可选依赖在 requirements-media.txt 中固定版本，不得未经允许自动安装或下载模型。
+使用 scripts/organizer.py 维护配置、预演、移动、重命名、报告与整理状态；核心流程无需第三方 Python 依赖。文档提取、图片 OCR、音频/视频转写及原始分析缓存已拆分到独立脚本，按 [references/intent-analysis.md](references/intent-analysis.md) 路由。Python 和路径逻辑必须同时兼容 macOS 与 Windows，不能依赖 Finder、Quick Look、Explorer 或仅某个代理提供的读取工具。平台与安装规则见 [references/platforms.md](references/platforms.md)。可选内容分析依赖统一在 requirements.txt 中固定版本，不得未经允许自动安装或下载模型。
 
 1. 完成 configure 后运行预演：
 
@@ -60,9 +60,9 @@ python3 scripts/organizer.py configure --root <目标目录> --allow-rename <yes
 
    默认将计划写到目标目录的 .cache/.organizer.plan.json，并将待分析项写到 .cache/.organizer.analysis-required.json。读取计划并向用户概述数量、一级/二级目标、移动/重命名映射、分类依据和所有跳过原因。
 
-2. 若计划中的 analysis_required 非空，读取 [references/intent-analysis.md](references/intent-analysis.md)：图片通过 scripts/ocr_image.py，音频或视频语音通过 scripts/transcribe_media.py，也可统一调用 scripts/analyze_media.py 并复用 .cache/.organizer.raw-analysis.json。代理依据这些本地证据生成意图摘要，写入 .cache/.organizer.intent.json，同时维护 .cache/file2intent.md，再重新运行 plan。不得在尚有必需分析项时请求执行确认。
+2. 若计划中的 analysis_required 非空，读取 [references/intent-analysis.md](references/intent-analysis.md)：文本、OOXML、EPUB、PDF 文本层通过 scripts/analyze_document.py；图片通过 scripts/ocr_image.py；音频或视频语音通过 scripts/transcribe_media.py，也可调用 scripts/analyze_media.py 复用 .cache/.organizer.raw-analysis.json。代理依据这些本地证据生成意图摘要，写入 .cache/.organizer.intent.json，同时维护 .cache/file2intent.md，再重新运行 plan。不得在尚有必需分析项时请求执行确认。
 
-   在开始逐项识别前，运行 python3 scripts/run_queue.py create --root <目标目录> 建立持久任务队列。Worker 每批通过 claim 领取不超过 12 项，每完成一项立即用 complete 原子落盘；任务中断后使用 resume 释放超时 running 任务并继续。全部任务进入终态后运行 merge，把完成结果原子合并到 .cache/.organizer.intent.json，再刷新 file2intent.md 并重新运行 plan。聊天上下文不是进度来源，进度只以 .cache/runs/<run-id> 为准。
+   在开始逐项识别前，运行 python3 scripts/run_queue.py create --root <目标目录> 建立持久任务队列。优先运行 `python3 scripts/analyze_batch.py --root <目标目录>`，让终端以有界多进程并行提取文档证据；正文只写入运行目录的 evidence/，终端只输出短索引。然后代理按 evidence-index.json 分批读取必要证据并生成紧凑意图结果。Worker 每批通过 claim 领取不超过 12 项，每完成一项立即用 complete 原子落盘；任务中断后使用 resume 释放超时 running 任务并继续。全部任务进入终态后运行 merge，把完成结果原子合并到 .cache/.organizer.intent.json，再刷新 file2intent.md 并重新运行 plan。聊天上下文不是进度来源，进度只以 .cache/runs/<run-id> 为准。
 
 3. analysis_required 为空后展示最终预演。用户明确确认本次计划后执行：
 
@@ -103,6 +103,9 @@ python3 scripts/organizer.py configure --root <目标目录> --allow-rename <yes
 - .cache/runs/<run-id>/manifest.json 固化本次配置；jobs/ 每文件一个任务；results/ 与 failures/ 每文件一个结果；summary.json 汇总进度；heartbeat.json 记录 Worker 心跳。
 - 任务状态为 pending、running、completed、failed、unavailable、stale 或 skipped。每项最多重试 2 次；格式不支持、模型缺失和加密文件直接 unavailable，不做无意义重试。
 - 每次领取 10–12 项，最多 20 项。每项分析前后校验大小和修改时间；变化则标记 stale，留待新一轮。
+- 文档证据提取默认使用 `min(4, CPU 核心数)` 个进程，用户可用 `--workers` 调整，最高 16。输出证据默认每文件最多 8000 字符；PDF 默认读取前 6 页，必要时抽样中间页和末页；XLSX 默认每表抽取前 20 行、12 列。先凭小样本判断，证据不足才扩大范围，禁止默认把全文打印到终端或发送进模型。
+- PDF 先尝试本机 pdftotext（若已存在），且必须输出到临时文件；否则回退 pypdf。表格抽取、全量工作簿分析属于用户另有要求时的深度模式，不是文件命名的默认路径。
+- OCR 与 Whisper 默认单进程串行，避免多个大模型实例争抢内存；文档解析可并行。
 - 环境支持且任务足够多时，可用只读子 Agent 分三路处理文档、图片、音视频；每个子 Agent 只能领取队列任务并写自己的逐文件结果，禁止移动、重命名或修改共同计划。主 Agent 唯一负责合并意图缓存、预演及执行。
 - Whisper 默认只允许一个 Worker，避免重复加载模型耗尽内存；图片与文档可与它并行。环境不支持子 Agent 时按同一队列顺序处理，恢复机制不受影响。
 
@@ -114,6 +117,10 @@ python3 scripts/organizer.py configure --root <目标目录> --allow-rename <yes
 
 修改 Skill 后运行 python3 tests/run_all.py。测试仅使用临时目录，覆盖分类、配置、名称策略、隐私、路径安全、冲突、幂等、可恢复队列、缓存布局、报告与媒体依赖降级，并在 .test-results 生成 Markdown 和 JSON 报告。真实 OCR/转写模型质量、Finder 弹出和对话自动触发属于可选人工/集成验收，不在默认测试中下载模型或操作真实下载目录。
 
+## 代理与安装
+
+本 Skill 采用可移植的 `SKILL.md + scripts + references` 结构，整理逻辑不得调用 Codex 专有 SDK。Codex 的 `agents/openai.yaml` 仅提供可选 UI 元数据，其它代理可忽略。Codex 安装到 `~/.codex/skills/xunxu`；Claude Code 安装到 `~/.claude/skills/xunxu` 或项目 `.claude/skills/xunxu`。WorkBuddy、豆包及其它产品仅在其版本能读取本地 Agent Skill 并运行 Python 时兼容；未核实其官方路径前，使用 `scripts/install.py --product generic --destination <实际路径>`，不得声称已验证原生兼容。安装细节与 Windows 命令见 [references/platforms.md](references/platforms.md)。
+
 ## 源码仓库同步
 
-循序 Skill 的 Git 仓库固定为 /Users/zhangzhenlin01/project/xunxu-skill。每次修改安装目录 /Users/zhangzhenlin01/.codex/skills/xunxu 后，必须在同一任务内运行 scripts/sync_skill.py，把全部 Skill 文件同步到仓库根目录，再从仓库运行 tests/run_all.py 并用 --check 验证两边一致。保留仓库自身的 .git 与 README.md，不自动 commit 或 push。若用户直接修改仓库版本，则以仓库为 source 反向同步到安装目录，再测试并检查一致性。
+维护者当前 Git 仓库是 `/Users/zhangzhenlin01/project/xunxu-skill`，Codex 安装副本是 `/Users/zhangzhenlin01/.codex/skills/xunxu`。这两个路径只属于维护流程，不能写入用户安装或整理逻辑。每次修改任一副本后，必须在同一任务内运行 scripts/sync_skill.py 同步另一副本，再从仓库运行 tests/run_all.py 并用 --check 验证一致。保留仓库自身的 .git 与 README.md，不自动 commit 或 push。

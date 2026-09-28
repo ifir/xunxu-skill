@@ -20,6 +20,9 @@ SCRIPTS = SKILL / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import analyze_media
+import analyze_document
+import analyze_batch
+import install as skill_install
 import organizer
 import run_queue
 
@@ -236,6 +239,71 @@ class ReportAndMediaTests(Base):
         configure(self.root, rename=True, trust=False); data = plan(self.root)
         self.assertEqual(data["analysis_required"], [])
 
+class PortabilityTests(Base):
+    def test_generated_names_are_windows_safe(self) -> None:
+        self.assertEqual(organizer.clipped_text('CON', 8), 'CON-文件')
+        cleaned = organizer.clipped_text('报告<>:"/\\|?*.', 20)
+        self.assertFalse(any(character in cleaned for character in '<>:"/\\|?*'))
+        self.assertFalse(cleaned.endswith(('.', ' ')))
+
+    def test_fingerprint_survives_rename(self) -> None:
+        source = write(self.root / "before.txt", "portable cache identity")
+        first = organizer.fingerprint(source, source.stat())
+        destination = self.root / "after.txt"
+        source.rename(destination)
+        self.assertEqual(first, organizer.fingerprint(destination, destination.stat()))
+        self.assertEqual(first, analyze_media.fingerprint(destination))
+
+    def test_document_text_and_docx_xml_extraction(self) -> None:
+        text_file = write(self.root / "note.txt", "跨平台文档内容")
+        self.assertIn("跨平台文档内容", analyze_document.extract_text(text_file)["text"])
+        import zipfile
+        docx = self.root / "sample.docx"
+        with zipfile.ZipFile(docx, "w") as archive:
+            archive.writestr("word/document.xml", "<w:document xmlns:w='urn:w'><w:p><w:t>合同摘要</w:t></w:p></w:document>")
+        old = time.time() - 1200; os.utime(docx, (old, old))
+        result = analyze_document.extract_text(docx)
+        self.assertEqual(result["method"], "docx-xml")
+        self.assertIn("合同摘要", result["text"])
+
+    def test_xlsx_preview_is_bounded_and_includes_sheet_context(self) -> None:
+        import zipfile
+        workbook = self.root / "sales.xlsx"
+        workbook_xml = "<workbook xmlns='urn:x'><sheets><sheet name='销售明细' sheetId='1'/></sheets></workbook>"
+        strings = "<sst xmlns='urn:x'><si><t>客户</t></si><si><t>金额</t></si><si><t>华东公司</t></si></sst>"
+        sheet = "<worksheet xmlns='urn:x'><sheetData><row><c t='s'><v>0</v></c><c t='s'><v>1</v></c></row><row><c t='s'><v>2</v></c><c><v>1000</v></c></row></sheetData></worksheet>"
+        with zipfile.ZipFile(workbook, "w") as archive:
+            archive.writestr("xl/workbook.xml", workbook_xml)
+            archive.writestr("xl/sharedStrings.xml", strings)
+            archive.writestr("xl/worksheets/sheet1.xml", sheet)
+        old = time.time() - 1200; os.utime(workbook, (old, old))
+        result = analyze_document.extract_text(workbook, limit=200)
+        self.assertEqual(result["method"], "xlsx-preview")
+        self.assertIn("销售明细", result["text"]); self.assertIn("华东公司", result["text"])
+        self.assertLessEqual(len(result["text"]), 200)
+
+    def test_batch_analyzer_writes_evidence_not_body_to_stdout(self) -> None:
+        source = write(self.root / "a1b2c3d4e5f60718.txt", "季度销售分析正文")
+        configure(self.root, rename=True, trust=False); plan(self.root)
+        summary = run_queue.create_run(self.root, organizer.cache_path(self.root, ".organizer.analysis-required.json"), organizer.cache_path(self.root, ".organizer.config.json"))
+        run = self.root / ".cache" / "runs" / summary["run_id"]
+        result = analyze_batch.analyze_jobs(self.root, run, 2, 1000, 3, False, "small", 10)
+        evidence = run / "evidence" / f"{organizer.fingerprint(source, source.stat())}.json"
+        self.assertTrue(evidence.is_file()); self.assertTrue((run / "evidence-index.json").is_file())
+        self.assertEqual(result["total_evidence"], 1)
+        self.assertIn("季度销售分析正文", json.loads(evidence.read_text(encoding="utf-8"))["text"])
+
+    def test_installer_is_non_overwriting_and_generic(self) -> None:
+        source = self.root / "source"
+        write(source / "SKILL.md", "---\nname: xunxu\n---\n")
+        write(source / "scripts" / "tool.py", "pass")
+        destination = self.root / "custom-skills" / "xunxu"
+        actions = skill_install.install(source, destination)
+        self.assertEqual(len(actions), 2)
+        self.assertTrue((destination / "SKILL.md").is_file())
+        with self.assertRaises(ValueError):
+            skill_install.install(source, destination)
+
 class RecordingResult(unittest.TextTestResult):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs); self.records = []
@@ -250,7 +318,7 @@ def write_report(output: Path, result: RecordingResult, elapsed: float) -> tuple
     payload = {"generated_at": datetime.now().astimezone().isoformat(timespec="seconds"), "elapsed_seconds": round(elapsed, 3), "total": result.testsRun, "counts": counts, "successful": result.wasSuccessful(), "tests": [{"name": name, "status": status, "detail": detail} for name, status, detail in result.records]}
     json_path = output / "xunxu-test-report.json"; json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     rows = [f"| {status} | {name.replace('|', '/')} |" for name, status, _ in result.records]
-    notes = ["- 媒体测试默认验证安全降级；未安装 PaddleOCR/faster-whisper 时不会下载模型。", "- 静态 HTML 测试覆盖文件详情弹窗、原始名称、当前名称、修改时间、大小和位置，不打开文件或文件夹。", "- 对话自动触发与提问顺序需另做真实会话验收，Python 测试无法模拟产品路由。"]
+    notes = ["- 媒体测试默认验证安全降级；未安装 PaddleOCR/faster-whisper 时不会下载模型。", "- 跨平台测试覆盖移动稳定指纹、文档解析和不覆盖式通用安装；真实 Windows 由 GitHub Actions 矩阵验证。", "- 静态 HTML 测试覆盖文件详情弹窗、原始名称、当前名称、修改时间、大小和位置，不打开文件或文件夹。", "- 对话自动触发与提问顺序需另做真实会话验收，Python 测试无法模拟产品路由。"]
     md = f"# 循序（Xunxu）测试报告\n\n- 时间：{payload['generated_at']}\n- 结果：{'通过' if result.wasSuccessful() else '失败'}\n- 总数：{result.testsRun}\n- 通过：{counts['passed']}\n- 失败：{counts['failed'] + counts['error']}\n- 跳过：{counts['skipped']}\n- 耗时：{elapsed:.3f} 秒\n\n## 用例\n\n| 状态 | 用例 |\n|---|---|\n" + "\n".join(rows) + "\n\n## 边界说明\n\n" + "\n".join(notes) + "\n"
     md_path = output / "xunxu-test-report.md"; md_path.write_text(md, encoding="utf-8")
     return md_path, json_path

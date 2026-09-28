@@ -1,0 +1,5 @@
+# Optional local content-analysis dependencies. Install only when content analysis is requested.
+pypdf==6.1.1
+faster-whisper==1.2.1
+paddleocr==3.7.0
+# PaddleOCR also requires a matching PaddlePaddle runtime. Install the CPU/GPU build for the host separately.

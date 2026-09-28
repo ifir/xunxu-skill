@@ -11,7 +11,7 @@ def extract_text(path: Path, lang: str = "ch") -> dict:
     try:
         from paddleocr import PaddleOCR
     except ImportError:
-        return result_record(path, "", "unavailable", "缺少 paddleocr；请按 requirements-media.txt 安装可选依赖和匹配的 PaddlePaddle runtime")
+        return result_record(path, "", "unavailable", "缺少 paddleocr；请按 requirements.txt 安装可选依赖和匹配的 PaddlePaddle runtime")
     try:
         engine = PaddleOCR(use_doc_orientation_classify=True, use_doc_unwarping=False, use_textline_orientation=True, lang=lang)
         output = engine.predict(input=str(path))

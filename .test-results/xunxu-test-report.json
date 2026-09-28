@@ -1,0 +1,144 @@
+{
+  "generated_at": "2026-09-28T11:44:05+08:00",
+  "elapsed_seconds": 0.249,
+  "total": 26,
+  "counts": {
+    "passed": 26,
+    "failed": 0,
+    "error": 0,
+    "skipped": 0
+  },
+  "successful": true,
+  "tests": [
+    {
+      "name": "test_all_eleven_categories (__main__.ClassificationTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_ambiguous_and_special_code (__main__.ClassificationTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_distrust_uses_meaningful_name_as_targeted_hint (__main__.ConfigurationAndNamingTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_rename_format_and_group_limit (__main__.ConfigurationAndNamingTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_trust_name_policy (__main__.ConfigurationAndNamingTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_config_change_after_plan_rejected (__main__.ExecutionSafetyTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_destination_conflict_never_overwrites (__main__.ExecutionSafetyTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_existing_directory_switch (__main__.ExecutionSafetyTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_idempotent_second_plan (__main__.ExecutionSafetyTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_move_preserves_content_and_creates_outputs (__main__.ExecutionSafetyTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_source_change_after_plan_is_skipped (__main__.ExecutionSafetyTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_batch_analyzer_writes_evidence_not_body_to_stdout (__main__.PortabilityTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_document_text_and_docx_xml_extraction (__main__.PortabilityTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_fingerprint_survives_rename (__main__.PortabilityTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_generated_names_are_windows_safe (__main__.PortabilityTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_installer_is_non_overwriting_and_generic (__main__.PortabilityTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_xlsx_preview_is_bounded_and_includes_sheet_context (__main__.PortabilityTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_hidden_incomplete_symlink_and_recent (__main__.PrivacyAndTraversalTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_path_escape_rejected (__main__.PrivacyAndTraversalTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_private_file_filename_only_and_private_folder_pruned (__main__.PrivacyAndTraversalTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_failed_job_retries_then_stops (__main__.QueueTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_queue_checkpoint_merge_and_resume (__main__.QueueTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_stale_running_lease_is_recovered (__main__.QueueTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_installers_and_archives_never_request_analysis (__main__.ReportAndMediaTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_media_dependency_absence_is_safe_or_analyzer_returns_structure (__main__.ReportAndMediaTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_static_report_file_details (__main__.ReportAndMediaTests)",
+      "status": "passed",
+      "detail": ""
+    }
+  ]
+}

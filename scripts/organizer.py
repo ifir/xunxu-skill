@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+FINGERPRINT_CHUNK = 64 * 1024
+
 CATEGORIES = ("文档资料", "电子书", "图片", "视频", "音频", "字幕", "压缩包", "安装包", "字体", "代码", "其它")
 EXTENSIONS = {
     "文档资料": "pdf doc docx docm dot dotx dotm xls xlsx xlsm xlsb xlt xltx xltm csv tsv ppt pptx pptm pot potx potm pps ppsx ppsm odt ods odp ott ots otp rtf txt text pages numbers key wps et dps hwp hwpx tex ltx",
@@ -31,6 +33,7 @@ CONFIG_AMBIGUOUS = {".json", ".jsonc", ".json5", ".yaml", ".yml", ".toml", ".xml
 SPECIAL_CODE_NAMES = {"makefile", "cmakelists.txt", "dockerfile", "containerfile", "jenkinsfile", "vagrantfile", "gemfile", "rakefile", "procfile", "justfile", "tiltfile", "brewfile", "podfile", "cartfile", "build", "workspace", "module.bazel", "meson.build", "package.json", "tsconfig.json", "jsconfig.json", "pom.xml", "build.xml", "composer.json", "requirements.txt", "pipfile", "pyproject.toml", "cargo.toml", "cargo.lock", "go.mod", "go.sum", "docker-compose.yml", "compose.yml", "taskfile.yml", "taskfile.yaml", "editorconfig", "gitignore", "gitattributes", "gitmodules", "dockerignore", "npmrc", "yarnrc"}
 GENERATED = {".organizer.plan.json", ".organizer.config.json", ".organizer.state.json", ".organizer.intent.json", ".organizer.analysis-required.json", ".organizer.raw-analysis.json", "organizer.report.html", "organizer.change.md", "index-catch.md", "file2intent.md", "网页可视化目录.sh"}
 INCOMPLETE = {".crdownload", ".part", ".download"}
+WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 CODE_MARKERS = ("#!/", "import ", "function ", "class ", "const ", "let ", "def ", "package ", "dependencies", "devdependencies", "compileroptions", "<project", "services:", "apiversion:", "resource ")
 MEANINGLESS_RE = re.compile(r"^(?:(?:img|dsc|pxl|vid|mov)[_-]?\d{3,}|(?:img|dsc|pxl|vid|mov|audio|recording|screenrecording)?[_-]?[0-9a-f]{12,}(?:[._@!%+-].*)?)$", re.I)
 
@@ -153,8 +156,23 @@ def is_meaningful(path: Path) -> bool:
     return alpha >= 2 and alpha >= digits / 2
 
 def fingerprint(path: Path, stat: os.stat_result) -> str:
-    identity = f"{stat.st_dev}:{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}"
-    return hashlib.sha256(identity.encode()).hexdigest()
+    digest = hashlib.sha256()
+    digest.update(f"v2:{stat.st_size}:{stat.st_mtime_ns}:".encode())
+    try:
+        with path.open("rb") as handle:
+            digest.update(handle.read(FINGERPRINT_CHUNK))
+            if stat.st_size > FINGERPRINT_CHUNK:
+                handle.seek(max(0, stat.st_size - FINGERPRINT_CHUNK))
+                digest.update(handle.read(FINGERPRINT_CHUNK))
+    except OSError:
+        digest.update(b"unreadable")
+    return digest.hexdigest()
+
+def folder_fingerprint(path: Path, root: Path) -> str:
+    # Folder identities are intentionally path-based. Directory inode/file-index
+    # behavior differs between APFS, NTFS and network drives.
+    relative_name = unicodedata.normalize("NFC", relative(path, root)).casefold()
+    return hashlib.sha256(f"dir-v2:{relative_name}".encode("utf-8")).hexdigest()
 
 def collect_files(root: Path, include_existing: bool, private: list[str]) -> tuple[list[Path], list[Path], list[dict[str, str]]]:
     files, folders, skipped = [], [], []
@@ -205,8 +223,13 @@ def collect_files(root: Path, include_existing: bool, private: list[str]) -> tup
     return files, folders, skipped
 
 def clipped_text(value: str, limit: int) -> str:
-    cleaned = re.sub(r"[\x00-\x1f:/\\]", "-", unicodedata.normalize("NFKC", value)).strip(" .-_")
-    return cleaned[:limit].rstrip(" .-_")
+    # The strict Windows component rules are also valid on macOS, which keeps
+    # generated names portable when a directory is later synchronized.
+    cleaned = re.sub(r'[\x00-\x1f<>:"/\\|?*]', "-", unicodedata.normalize("NFKC", value)).strip(" .-_")
+    cleaned = cleaned[:limit].rstrip(" .-_")
+    if cleaned.casefold() in WINDOWS_RESERVED:
+        cleaned = f"{cleaned}-文件"[:limit].rstrip(" .-_")
+    return cleaned
 
 def sanitized_name(original: str, suggested: str, mtime_ns: int) -> str:
     suffix = Path(original).suffix
@@ -291,7 +314,7 @@ def make_plan(root: Path, plan_path: Path, min_age: int) -> dict[str, Any]:
     if allow_rename and include_existing:
         for folder in folders:
             stat = folder.stat()
-            fp = hashlib.sha256(f"dir:{stat.st_dev}:{stat.st_ino}".encode()).hexdigest()
+            fp = folder_fingerprint(folder, root)
             cached = intent.get(fp) if isinstance(intent, dict) else None
             needs_analysis = (not trust) or (not is_meaningful(folder))
             suggested = ""
