@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-28T11:44:05+08:00",
-  "elapsed_seconds": 0.249,
-  "total": 26,
+  "generated_at": "2026-09-28T14:54:24+08:00",
+  "elapsed_seconds": 0.388,
+  "total": 28,
   "counts": {
-    "passed": 26,
+    "passed": 28,
     "failed": 0,
     "error": 0,
     "skipped": 0
@@ -87,6 +87,16 @@
     },
     {
       "name": "test_installer_is_non_overwriting_and_generic (__main__.PortabilityTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_long_text_samples_beginning_middle_and_end (__main__.PortabilityTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_modified_cached_file_requires_diff_analysis_and_refreshes_index (__main__.PortabilityTests)",
       "status": "passed",
       "detail": ""
     },

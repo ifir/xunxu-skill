@@ -12,6 +12,7 @@
 - 生成 YYMMDD-意图摘要.原扩展名 格式的新名称，并创建不超过 8 个字符的二级意图目录。
 - 使用磁盘任务队列保存分析进度，可在任务中断或上下文压缩后恢复。
 - 用有界多进程并行提取文档证据，正文落盘、终端只返回短索引，减少等待和 token 消耗。
+- 长文档从开头、中间、结尾或分散章节抽样；缓存文件发生修改时生成证据 diff、重新识别，并自动更新意图索引。
 - 生成追加式整理日志、意图缓存和独立静态 HTML 报告。
 
 ## 分类结构
@@ -38,42 +39,7 @@
 
 ## 安装
 
-| 产品 | 个人 Skill 目录 | 调用方式 | 验证状态 |
-|---|---|---|---|
-| Codex | `~/.codex/skills/xunxu` | `$xunxu` 或自然语言触发 | 已适配 |
-| Claude Code | `~/.claude/skills/xunxu` | `/xunxu` | 已按官方 Agent Skills 目录适配 |
-| WorkBuddy | 由具体版本决定 | 由具体版本决定 | 官方本地 Skill 路径尚未核实 |
-| 豆包 | 由具体版本决定 | 由具体版本决定 | 官方本地 Skill 路径尚未核实 |
-
-仓库是标准 `SKILL.md + scripts + references` 布局，核心代码不依赖 Codex SDK。WorkBuddy、豆包等产品若支持读取本地 Agent Skill 且能运行 Python，可用通用安装目标；否则不能仅复制目录就声称原生可用。
-
-### macOS / Linux
-
-通过 SSH 克隆到 Codex Skills 目录：
-
-    git clone git@github.com:ifir/xunxu-skill.git ~/.codex/skills/xunxu
-
-或使用 HTTPS：
-
-    git clone https://github.com/ifir/xunxu-skill.git ~/.codex/skills/xunxu
-
-也可从已克隆仓库安全复制，安装器遇到已存在目标会停止，不覆盖：
-
-    python3 scripts/install.py --product codex --dry-run
-    python3 scripts/install.py --product codex
-    python3 scripts/install.py --product claude
-    python3 scripts/install.py --product generic --destination /实际/Skills/目录/xunxu
-
-### Windows PowerShell
-
-    git clone https://github.com/ifir/xunxu-skill.git "$env:USERPROFILE\xunxu-skill"
-    cd "$env:USERPROFILE\xunxu-skill"
-    py -3 scripts/install.py --product codex --dry-run
-    py -3 scripts/install.py --product codex
-    py -3 scripts/install.py --product claude
-    py -3 scripts/install.py --product generic --destination "C:\实际\Skills\目录\xunxu"
-
-重新启动对应代理或开启新任务后再调用。更详细的平台边界见 [references/platforms.md](references/platforms.md)。
+在对话中说：“给我安装 [https://github.com/ifir/xunxu-skill](https://github.com/ifir/xunxu-skill) 这个 Skill”。
 
 ## 使用方式
 
@@ -176,7 +142,7 @@ PDF、OCR 和音视频转写的可选依赖统一固定在 [requirements.txt](re
     ├── .organizer.intent.json  机器可读意图缓存
     └── runs/                   可恢复任务记录
 
-静态报告不会打开文件或文件夹。点击文件名会显示原始文件名、当前文件名、最后修改时间、文件大小及精确字节数、当前相对位置。
+静态报告会按整理时间披露 `organizer.change.md` 中的全部历史变更，并展示当前目录归纳。点击文件名会显示原始文件名、当前文件名、最后修改时间、文件大小及精确字节数、当前相对位置；不会打开文件或文件夹。
 
 ## 脚本说明
 
@@ -190,27 +156,9 @@ PDF、OCR 和音视频转写的可选依赖统一固定在 [requirements.txt](re
 | scripts/transcribe_media.py | 本地音视频语音转写 |
 | scripts/analyze_media.py | 媒体分析入口及缓存 |
 | scripts/common.py | 文件指纹、时间及 JSON 公共逻辑 |
-| scripts/sync_skill.py | 同步安装目录与本仓库 |
 | scripts/install.py | Codex、Claude Code 与自定义目标安装 |
 
 通常应通过支持本地 Agent Skill 的代理使用本项目，不建议绕过 Skill 直接执行移动命令。
-
-## 开发与同步
-
-当前约定：
-
-    安装目录：~/.codex/skills/xunxu
-    Git 仓库：/Users/zhangzhenlin01/project/xunxu-skill
-
-安装目录同步到仓库：
-
-    python3 ~/.codex/skills/xunxu/scripts/sync_skill.py --source ~/.codex/skills/xunxu --destination /Users/zhangzhenlin01/project/xunxu-skill
-
-检查是否一致：
-
-    python3 ~/.codex/skills/xunxu/scripts/sync_skill.py --source ~/.codex/skills/xunxu --destination /Users/zhangzhenlin01/project/xunxu-skill --check
-
-直接修改仓库版本时，可交换 source 与 destination 反向同步。同步脚本保留仓库的 .git 和 README.md，不会自动提交或推送。
 
 ## 测试
 

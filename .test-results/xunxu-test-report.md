@@ -1,12 +1,12 @@
 # 循序（Xunxu）测试报告
 
-- 时间：2026-09-28T11:44:05+08:00
+- 时间：2026-09-28T14:54:24+08:00
 - 结果：通过
-- 总数：26
-- 通过：26
+- 总数：28
+- 通过：28
 - 失败：0
 - 跳过：0
-- 耗时：0.249 秒
+- 耗时：0.388 秒
 
 ## 用例
 
@@ -28,6 +28,8 @@
 | passed | test_fingerprint_survives_rename (__main__.PortabilityTests) |
 | passed | test_generated_names_are_windows_safe (__main__.PortabilityTests) |
 | passed | test_installer_is_non_overwriting_and_generic (__main__.PortabilityTests) |
+| passed | test_long_text_samples_beginning_middle_and_end (__main__.PortabilityTests) |
+| passed | test_modified_cached_file_requires_diff_analysis_and_refreshes_index (__main__.PortabilityTests) |
 | passed | test_xlsx_preview_is_bounded_and_includes_sheet_context (__main__.PortabilityTests) |
 | passed | test_hidden_incomplete_symlink_and_recent (__main__.PrivacyAndTraversalTests) |
 | passed | test_path_escape_rejected (__main__.PrivacyAndTraversalTests) |

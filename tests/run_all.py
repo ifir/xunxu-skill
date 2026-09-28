@@ -218,15 +218,24 @@ class QueueTests(Base):
 class ReportAndMediaTests(Base):
     def test_static_report_file_details(self) -> None:
         file = write(self.root / "图片" / "测试图.png")
-        report = organizer.write_report(self.root, organizer.now_iso(), [{"source": "原始随机名.png", "destination": "图片/测试图.png", "status": "已移动", "rename": "原始随机名.png → 测试图.png"}])
+        first = [{"source": "第一批.png", "destination": "图片/测试图.png", "status": "已移动", "rename": "第一批.png → 测试图.png", "reason": "图片意图"}]
+        second = [{"source": "第二批.png", "destination": "图片/第二批.png", "status": "跳过：测试", "rename": "未改名", "reason": "测试原因"}]
+        organizer.append_log(self.root, "2026-01-01T10:00:00+08:00", {}, first)
+        organizer.append_log(self.root, "2026-01-02T10:00:00+08:00", {}, second)
+        report = organizer.write_report(self.root, organizer.now_iso(), first)
         page = report.read_text(encoding="utf-8")
         self.assertEqual(report.parent, self.root)
         self.assertNotIn("/reveal?path=", page); self.assertNotIn("file://", page)
-        self.assertIn('data-original="原始随机名.png"', page)
+        self.assertIn('data-original="第一批.png"', page)
         self.assertIn('data-current="测试图.png"', page)
         self.assertIn("data-modified=", page); self.assertIn("data-size=", page); self.assertIn("data-bytes=", page)
         self.assertIn("<dialog id=\"file-detail\">", page)
         self.assertIn("data-location=", page)
+        self.assertIn("全部历史变更", page)
+        self.assertIn("2026-01-01T10:00:00+08:00", page)
+        self.assertIn("2026-01-02T10:00:00+08:00", page)
+        self.assertIn("第一批.png", page); self.assertIn("第二批.png", page)
+        self.assertEqual(len(organizer.read_change_history(self.root)), 2)
 
     def test_media_dependency_absence_is_safe_or_analyzer_returns_structure(self) -> None:
         image = write(self.root / "image.png", b"not real")
@@ -263,7 +272,7 @@ class PortabilityTests(Base):
             archive.writestr("word/document.xml", "<w:document xmlns:w='urn:w'><w:p><w:t>合同摘要</w:t></w:p></w:document>")
         old = time.time() - 1200; os.utime(docx, (old, old))
         result = analyze_document.extract_text(docx)
-        self.assertEqual(result["method"], "docx-xml")
+        self.assertEqual(result["method"], "docx-sampled")
         self.assertIn("合同摘要", result["text"])
 
     def test_xlsx_preview_is_bounded_and_includes_sheet_context(self) -> None:
@@ -278,9 +287,16 @@ class PortabilityTests(Base):
             archive.writestr("xl/worksheets/sheet1.xml", sheet)
         old = time.time() - 1200; os.utime(workbook, (old, old))
         result = analyze_document.extract_text(workbook, limit=200)
-        self.assertEqual(result["method"], "xlsx-preview")
+        self.assertEqual(result["method"], "xlsx-sampled")
         self.assertIn("销售明细", result["text"]); self.assertIn("华东公司", result["text"])
         self.assertLessEqual(len(result["text"]), 200)
+
+    def test_long_text_samples_beginning_middle_and_end(self) -> None:
+        content = "BEGIN-TOPIC\n" + "A" * 12000 + "\nMIDDLE-TOPIC\n" + "B" * 12000 + "\nEND-TOPIC"
+        path = write(self.root / "long.txt", content)
+        result = analyze_document.extract_text(path, limit=3000)
+        self.assertEqual(result["sample_strategy"], "beginning-middle-end")
+        self.assertTrue(result["truncated"]); self.assertIn("BEGIN-TOPIC", result["text"]); self.assertIn("MIDDLE-TOPIC", result["text"]); self.assertIn("END-TOPIC", result["text"])
 
     def test_batch_analyzer_writes_evidence_not_body_to_stdout(self) -> None:
         source = write(self.root / "a1b2c3d4e5f60718.txt", "季度销售分析正文")
@@ -303,6 +319,29 @@ class PortabilityTests(Base):
         self.assertTrue((destination / "SKILL.md").is_file())
         with self.assertRaises(ValueError):
             skill_install.install(source, destination)
+
+    def test_modified_cached_file_requires_diff_analysis_and_refreshes_index(self) -> None:
+        source = write(self.root / "文档资料" / "report.txt", "old quarterly report")
+        old_fp = organizer.fingerprint(source, source.stat())
+        old_record = {"path": "文档资料/report.txt", "original_name": "report.txt", "size": source.stat().st_size, "mtime_ns": source.stat().st_mtime_ns}
+        organizer.write_json(organizer.cache_path(self.root, ".organizer.state.json"), {"version": 1, "items": {old_fp: old_record}})
+        organizer.write_json(organizer.cache_path(self.root, ".organizer.intent.json"), {"version": 1, "items": {old_fp: {"source": "文档资料/report.txt", "intent": "旧季度报告", "suggested_name": "", "intent_group": "报告", "method": "text", "confidence": "high"}}})
+        old_run = self.root / ".cache" / "runs" / "old" / "evidence"
+        old_run.mkdir(parents=True)
+        organizer.write_json(old_run / f"{old_fp}.json", {"fingerprint": old_fp, "source": "文档资料/report.txt", "text": "old quarterly report"})
+        source.write_text("new annual strategy report", encoding="utf-8"); old = time.time() - 600; os.utime(source, (old, old))
+        configure(self.root, rename=True, existing=True, trust=True); data = plan(self.root)
+        job = next(item for item in data["analysis_required"] if item["source"] == "文档资料/report.txt")
+        self.assertEqual(job["analysis_depth"], "diff"); self.assertEqual(job["previous_fingerprint"], old_fp); self.assertEqual(job["cache_status"], "modified")
+        summary = run_queue.create_run(self.root, organizer.cache_path(self.root, ".organizer.analysis-required.json"), organizer.cache_path(self.root, ".organizer.config.json")); run = self.root / ".cache" / "runs" / summary["run_id"]
+        analyze_batch.analyze_jobs(self.root, run, 1, 1000, 3, False, "small", 10)
+        new_fp = job["fingerprint"]; evidence = json.loads((run / "evidence" / f"{new_fp}.json").read_text(encoding="utf-8"))
+        self.assertEqual(evidence["diff_status"], "changed"); self.assertIn("annual strategy", evidence["diff"])
+        result_path = write(self.root / "result-new.json", json.dumps({"intent": "年度战略报告", "suggested_name": "年度战略报告", "intent_group": "报告", "method": "text-diff", "confidence": "high"}))
+        claimed = run_queue.claim(run, "worker", 1, 30)["claimed"][0]; run_queue.complete(self.root, run, claimed["fingerprint"], result_path, "completed", None); run_queue.merge_results(self.root, run)
+        updated = organizer.load_json(organizer.cache_path(self.root, ".organizer.intent.json"), {})["items"]
+        self.assertNotIn(old_fp, updated); self.assertEqual(updated[new_fp]["supersedes"], old_fp)
+        self.assertIn("年度战略报告", (self.root / ".cache" / "file2intent.md").read_text(encoding="utf-8"))
 
 class RecordingResult(unittest.TextTestResult):
     def __init__(self, *args, **kwargs):

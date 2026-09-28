@@ -262,6 +262,14 @@ def write_index(root: Path, intent_data: dict[str, Any], path_lookup: dict[str, 
     path.write_text(content + ("\n".join(rows) if rows else "| - | - | - | 暂无缓存 | - | - | - | - |") + "\n", encoding="utf-8")
     return path
 
+def retire_superseded_cache(intent_data: dict[str, Any]) -> None:
+    items = intent_data.get("items", {})
+    if not isinstance(items, dict):
+        return
+    superseded = {str(item.get("supersedes")) for item in items.values() if isinstance(item, dict) and item.get("supersedes")}
+    for fingerprint_value in superseded:
+        items.pop(fingerprint_value, None)
+
 def make_plan(root: Path, plan_path: Path, min_age: int) -> dict[str, Any]:
     config = load_json(cache_path(root, ".organizer.config.json"), None)
     if not isinstance(config, dict):
@@ -271,6 +279,11 @@ def make_plan(root: Path, plan_path: Path, min_age: int) -> dict[str, Any]:
     private = [str(item) for item in config.get("private_names", [])]
     intent = load_json(cache_path(root, ".organizer.intent.json"), {"items": {}}).get("items", {})
     state = load_json(cache_path(root, ".organizer.state.json"), {"items": {}}).get("items", {})
+    state_by_path: dict[str, tuple[str, dict[str, Any]]] = {}
+    if isinstance(state, dict):
+        for state_fp, record in state.items():
+            if isinstance(record, dict) and record.get("path"):
+                state_by_path[str(record["path"])] = (str(state_fp), record)
     current = datetime.now().astimezone()
     files, folders, skipped = collect_files(root, include_existing, private)
     moves, folder_renames, analysis = [], [], []
@@ -287,10 +300,14 @@ def make_plan(root: Path, plan_path: Path, min_age: int) -> dict[str, Any]:
             skipped.append({"source": rel_source, "reason": f"最近 {min_age} 秒内仍可能写入"}); continue
         fp = fingerprint(source, stat)
         within_category = bool(source.relative_to(root).parts and source.relative_to(root).parts[0] in CATEGORIES)
-        already = bool(state.get(fp)) or within_category
+        matching_state = state.get(fp) if isinstance(state, dict) else None
+        previous_state = state_by_path.get(rel_source)
+        previous_fp = previous_state[0] if previous_state and previous_state[0] != fp else ""
+        cache_changed = bool(previous_state and not matching_state and (previous_state[1].get("size") != stat.st_size or previous_state[1].get("mtime_ns") != stat.st_mtime_ns))
+        already = bool(matching_state) or (within_category and not cache_changed)
         category, reason = classify(source, allow_content=allow_rename and not private_item and not already)
         cached = intent.get(fp) if isinstance(intent, dict) else None
-        needs_analysis = allow_rename and not already and category not in {"安装包", "压缩包"} and (private_item or (not trust) or (not is_meaningful(source)))
+        needs_analysis = allow_rename and not already and category not in {"安装包", "压缩包"} and (cache_changed or private_item or (not trust) or (not is_meaningful(source)))
         suggested, group = "", ""
         if isinstance(cached, dict):
             if cached.get("confidence") in {"high", "medium"}:
@@ -304,7 +321,12 @@ def make_plan(root: Path, plan_path: Path, min_age: int) -> dict[str, Any]:
                 analysis.append({"kind": "file", "source": rel_source, "fingerprint": fp, "media_category": category, "method_required": "filename-only", "name_hint": source.stem, "analysis_depth": "filename-only", "reason": "私密文件：只允许依据文件名识别意图，禁止读取内容"})
             else:
                 meaningful = is_meaningful(source)
-                analysis.append({"kind": "file", "source": rel_source, "fingerprint": fp, "media_category": category, "method_required": "content", "name_hint": source.stem if meaningful else "", "analysis_depth": "targeted" if (not trust and meaningful) else "full", "reason": "名称不足以可靠表达意图" if trust else ("不信任名称：以名称作为待验证线索，先做定向轻量读取" if meaningful else "不信任名称：名称无有效线索，执行标准内容识别")})
+                if cache_changed:
+                    reason_text, depth = "缓存文件已修改：优先比较旧证据差异并重新识别意图", "diff"
+                else:
+                    reason_text = "名称不足以可靠表达意图" if trust else ("不信任名称：以名称作为待验证线索，先做定向轻量读取" if meaningful else "不信任名称：名称无有效线索，执行标准内容识别")
+                    depth = "targeted" if (not trust and meaningful) else "full"
+                analysis.append({"kind": "file", "source": rel_source, "fingerprint": fp, "previous_fingerprint": previous_fp, "cache_status": "modified" if cache_changed else "new", "media_category": category, "method_required": "content", "name_hint": source.stem if meaningful else "", "analysis_depth": depth, "reason": reason_text})
         new_name = sanitized_name(source.name, suggested, stat.st_mtime_ns) if suggested else source.name
         destination = root / category / group / new_name if group else root / category / new_name
         if source.resolve(strict=False) == destination.resolve(strict=False):
@@ -381,6 +403,47 @@ def report_metadata(root: Path, results: list[dict[str, str]]) -> dict[str, dict
             output[destination] = {"original": Path(item.get("source", "")).name, "current": Path(destination).name}
     return output
 
+def split_markdown_row(line: str) -> list[str]:
+    values, current, escaped = [], [], False
+    for character in line.strip().strip("|"):
+        if escaped:
+            current.append(character); escaped = False
+        elif character == "\\":
+            escaped = True
+        elif character == "|":
+            values.append("".join(current).strip()); current = []
+        else:
+            current.append(character)
+    if escaped:
+        current.append("\\")
+    values.append("".join(current).strip())
+    return values
+
+def read_change_history(root: Path) -> list[dict[str, Any]]:
+    try:
+        lines = (root / "organizer.change.md").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    runs: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    in_table = False
+    for line in lines:
+        if line.startswith("## "):
+            current = {"run_at": line[3:].strip(), "config": "", "items": []}; runs.append(current); in_table = False
+        elif current is not None and line.startswith("配置："):
+            current["config"] = line.strip()
+        elif current is not None and line.startswith("| 状态 |"):
+            in_table = True
+        elif current is not None and in_table and line.startswith("|---"):
+            continue
+        elif current is not None and in_table and line.startswith("|"):
+            values = split_markdown_row(line)
+            if len(values) >= 5:
+                current["items"].append(dict(zip(("status", "source", "destination", "rename", "reason"), values[:5])))
+        elif current is not None and in_table and line.strip():
+            in_table = False
+    return [run for run in runs if run["items"]]
+
 def write_report(root: Path, run_time: str, results: list[dict[str, str]]) -> Path:
     groups = [(category, listed_files(root, category)) for category in CATEGORIES]
     groups = [(category, files) for category, files in groups if files]
@@ -392,12 +455,23 @@ def write_report(root: Path, run_time: str, results: list[dict[str, str]]) -> Pa
             modified = datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds")
             items.append(f'''<li><button class="file-button" type="button" data-original="{html.escape(details.get('original', path.name), quote=True)}" data-current="{html.escape(path.name, quote=True)}" data-modified="{html.escape(modified, quote=True)}" data-size="{html.escape(format_size(stat.st_size), quote=True)}" data-bytes="{stat.st_size}" data-location="{html.escape(rel, quote=True)}">{html.escape(relative(path, root / category))}</button></li>''')
         nodes.append(f'<details class="folder"><summary><span>{html.escape(category)}</span><b>{len(files)}</b></summary><ul>{"".join(items)}</ul></details>')
-    mappings = "".join(f'<li><span>{html.escape(r["source"])}</span><strong>→</strong><span>{html.escape(r["destination"])}</span><em>{html.escape(r["status"])}</em></li>' for r in results) or "<li>本次没有移动记录</li>"
-    moved = sum(item["status"] == "已移动" for item in results); renamed = sum(item.get("rename") not in {"", "未改名"} for item in results); total = sum(len(files) for _, files in groups)
+    history = read_change_history(root); history_nodes = []
+    for index, run in enumerate(reversed(history)):
+        rows = []
+        for item in run["items"]:
+            cells = "".join(f"<td>{html.escape(str(item[key]))}</td>" for key in ("status", "source", "destination", "rename", "reason"))
+            rows.append(f"<tr>{cells}</tr>")
+        config = f'<p class="run-config">{html.escape(str(run.get("config", "")))}</p>' if run.get("config") else ""
+        opened = " open" if index == 0 else ""
+        history_nodes.append(f'<details class="history-run"{opened}><summary><span>{html.escape(str(run["run_at"]))}</span><b>{len(run["items"])}</b></summary>{config}<div class="table-wrap"><table><thead><tr><th>状态</th><th>原位置</th><th>目标位置</th><th>名称变化</th><th>分类依据</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div></details>')
+    history_html = "".join(history_nodes) or "<p>暂无历史整理记录</p>"
+    historical_items = sum(len(run["items"]) for run in history)
+    total = sum(len(files) for _, files in groups)
     style = """*{box-sizing:border-box}:root{color-scheme:light dark;--bg:#f7f8fa;--panel:#fff;--text:#17202a;--muted:#68707c;--line:#e5e8ec;--accent:#315efb;--soft:#eef2ff}@media(prefers-color-scheme:dark){:root{--bg:#111318;--panel:#1a1d24;--text:#eef1f5;--muted:#a4abb6;--line:#30343c;--accent:#8fa9ff;--soft:#232b45}}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}main{max-width:980px;margin:auto;padding:28px 18px 48px}header{display:flex;justify-content:space-between;gap:20px;align-items:end}h1{font-size:24px;margin:0 0 4px}p{margin:0;color:var(--muted)}.stats{display:flex;gap:18px}.stat b{display:block;font-size:20px}.stat span{color:var(--muted)}.tree{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin:22px 0}details{background:var(--panel);border:1px solid var(--line);border-radius:8px}summary{display:flex;align-items:center;padding:11px 12px;cursor:pointer;list-style:none}summary::-webkit-details-marker{display:none}summary:before{content:\"›\";margin-right:8px;color:var(--accent)}details[open] summary:before{transform:rotate(90deg)}summary b{margin-left:auto;background:var(--soft);color:var(--accent);border-radius:12px;padding:1px 8px}ul{list-style:none;margin:0;padding:0 12px 10px}.folder li{border-top:1px solid var(--line)}.file-button{display:block;width:100%;padding:8px 2px;border:0;background:transparent;color:var(--text);font:inherit;text-align:left;word-break:break-all;cursor:pointer}.file-button:hover,.file-button:focus{color:var(--accent);text-decoration:underline}.changes summary{font-weight:600}.changes ul{padding:0 12px 12px}.changes li{display:grid;grid-template-columns:1fr auto 1fr auto;gap:8px;border-top:1px solid var(--line);padding:8px 2px;align-items:center}.changes strong{color:var(--accent)}.changes em{font-style:normal;color:var(--muted);font-size:12px}dialog{width:min(520px,calc(100% - 32px));border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:0;box-shadow:0 18px 60px #0004}dialog::backdrop{background:#0007}.dialog-head{display:flex;align-items:center;padding:15px 18px;border-bottom:1px solid var(--line)}.dialog-head h2{font-size:17px;margin:0}.close{margin-left:auto;border:0;background:transparent;color:var(--muted);font-size:22px;cursor:pointer}.facts{display:grid;grid-template-columns:100px 1fr;margin:0;padding:10px 18px 18px}.facts dt,.facts dd{margin:0;padding:7px 0;border-bottom:1px solid var(--line)}.facts dt{color:var(--muted)}.facts dd{word-break:break-all}footer{margin-top:14px;color:var(--muted);font-size:12px}@media(max-width:640px){header{display:block}.stats{margin-top:14px}.changes li{grid-template-columns:1fr auto 1fr}.changes em{grid-column:1/-1}.facts{grid-template-columns:86px 1fr}}"""
     modal = '''<dialog id="file-detail"><div class="dialog-head"><h2>文件详情</h2><button class="close" id="detail-close" type="button" aria-label="关闭">×</button></div><dl class="facts"><dt>原始文件名</dt><dd id="detail-original"></dd><dt>当前文件名</dt><dd id="detail-current"></dd><dt>修改时间</dt><dd id="detail-modified"></dd><dt>文件大小</dt><dd><span id="detail-size"></span>（<span id="detail-bytes"></span> 字节）</dd><dt>当前位置</dt><dd id="detail-location"></dd></dl></dialog>'''
     script = '''<script>const d=document.getElementById("file-detail");document.addEventListener("click",e=>{const b=e.target.closest(".file-button");if(!b)return;for(const k of ["original","current","modified","size","bytes","location"]){document.getElementById("detail-"+k).textContent=b.dataset[k]||"-"}d.showModal()});document.getElementById("detail-close").addEventListener("click",()=>d.close());d.addEventListener("click",e=>{if(e.target===d)d.close()});</script>'''
-    document = f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>文件整理报告</title><style>{style}</style></head><body><main><header><div><h1>文件整理报告</h1><p>{html.escape(str(root))}<br>{html.escape(run_time)}</p></div><div class="stats"><div class="stat"><b>{moved}</b><span>本次移动</span></div><div class="stat"><b>{renamed}</b><span>本次改名</span></div><div class="stat"><b>{total}</b><span>已归类</span></div></div></header><div class="tree">{"".join(nodes) or '<p>暂无已归类文件</p>'}</div><details class="changes"><summary>本次变更明细（{len(results)}）</summary><ul>{mappings}</ul></details><footer>点击文件名查看原始名称、修改时间与大小。页面不会打开文件或文件夹。</footer></main>{modal}{script}</body></html>'''
+    history_style = """<style>main{max-width:1180px}h2{font-size:18px;margin:26px 0 10px}.tree{margin:12px 0}.history{display:grid;gap:10px}.history-run summary{font-weight:600}.run-config{padding:0 12px 10px;font-size:12px}.table-wrap{overflow:auto;border-top:1px solid var(--line)}table{width:100%;border-collapse:collapse;min-width:900px;font-size:12px}th,td{padding:8px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line);word-break:break-word}th{color:var(--muted);font-weight:600;background:var(--soft)}tbody tr:last-child td{border-bottom:0}</style>"""
+    document = f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>文件整理报告</title><style>{style}</style>{history_style}</head><body><main><header><div><h1>文件整理报告</h1><p>{html.escape(str(root))}<br>报告刷新：{html.escape(run_time)}</p></div><div class="stats"><div class="stat"><b>{len(history)}</b><span>整理批次</span></div><div class="stat"><b>{historical_items}</b><span>历史变更</span></div><div class="stat"><b>{total}</b><span>已归类</span></div></div></header><h2>当前目录</h2><div class="tree">{"".join(nodes) or '<p>暂无已归类文件</p>'}</div><h2>全部历史变更</h2><div class="history">{history_html}</div><footer>历史明细来自只追加的 organizer.change.md。点击当前目录中的文件名可查看原始名称、修改时间与大小；页面不会打开文件或文件夹。</footer></main>{modal}{script}</body></html>'''
     path = root / "organizer.report.html"; path.write_text(document, encoding="utf-8"); return path
 
 def validate_mapping(root: Path, item: dict[str, Any], config: dict[str, Any]) -> tuple[Path, Path]:
@@ -462,6 +536,7 @@ def apply_plan(root: Path, plan_path: Path) -> dict[str, Any]:
     intent_data = load_json(cache_path(root, ".organizer.intent.json"), {"version": 1, "items": {}})
     state.setdefault("items", {})
     intent_data.setdefault("items", {})
+    retire_superseded_cache(intent_data)
     path_lookup: dict[str, str] = {}
     root_device = root.stat().st_dev
     for item in data.get("moves", []):
@@ -531,6 +606,8 @@ def main() -> int:
     execute.add_argument("--plan-file", type=Path)
     index_cmd = sub.add_parser("index", help="从机器缓存刷新 .cache/file2intent.md")
     index_cmd.add_argument("--root", type=Path, required=True)
+    report_cmd = sub.add_parser("report", help="从当前目录和完整变更日志刷新静态 HTML 报告")
+    report_cmd.add_argument("--root", type=Path, required=True)
     args = parser.parse_args()
     root = args.root.expanduser().resolve()
     if not root.is_dir():
@@ -546,6 +623,9 @@ def main() -> int:
         elif args.command == "index":
             intent_data = load_json(cache_path(root, ".organizer.intent.json"), {"version": 1, "items": {}})
             result = {"index": str(write_index(root, intent_data))}
+        elif args.command == "report":
+            history = read_change_history(root)
+            result = {"report": str(write_report(root, now_iso(), [])), "runs": len(history), "changes": sum(len(run["items"]) for run in history)}
         else:
             plan_path = (args.plan_file or cache_path(root, ".organizer.plan.json")).expanduser().resolve()
             if args.command == "plan":

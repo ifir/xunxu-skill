@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -36,12 +37,34 @@ def _media_job(path: Path, kind: str, max_chars: int, model: str, max_seconds: f
     return result
 
 def _record(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
-    return {
+    record = {
         "fingerprint": job.get("fingerprint"), "source": job.get("source"),
+        "previous_fingerprint": job.get("previous_fingerprint", ""), "cache_status": job.get("cache_status", "new"),
         "name_hint": job.get("name_hint", ""), "analysis_depth": job.get("analysis_depth"),
         "method": result.get("method"), "text": result.get("text", ""),
         "error": result.get("error"), "extracted_at": now_iso(),
     }
+    for key in ("sample_strategy", "sampled_pages", "truncated"):
+        if key in result:
+            record[key] = result[key]
+    return record
+
+def _previous_evidence(root: Path, fingerprint: str) -> dict[str, Any] | None:
+    if not fingerprint:
+        return None
+    matches = sorted((root / ".cache" / "runs").glob(f"*/evidence/{fingerprint}.json"), reverse=True)
+    return read_json(matches[0], None) if matches else None
+
+def _attach_diff(root: Path, job: dict[str, Any], record: dict[str, Any], limit: int = 4000) -> None:
+    previous = _previous_evidence(root, str(job.get("previous_fingerprint") or ""))
+    if not previous:
+        record["diff_status"] = "previous-evidence-unavailable"
+        return
+    before = str(previous.get("text") or "").splitlines()
+    after = str(record.get("text") or "").splitlines()
+    diff = "\n".join(difflib.unified_diff(before, after, fromfile="previous", tofile="current", n=2))
+    record["diff_status"] = "changed" if diff else "sample-unchanged"
+    record["diff"] = diff[:limit]
 
 def analyze_jobs(root: Path, run: Path, workers: int, max_chars: int, max_pages: int, include_media: bool, model: str, max_seconds: float) -> dict[str, Any]:
     evidence_dir = run / "evidence"
@@ -75,14 +98,18 @@ def analyze_jobs(root: Path, run: Path, workers: int, max_chars: int, max_pages:
                     result = future.result()
                 except Exception as exc:
                     result = {"method": "unavailable", "text": "", "error": str(exc)}
-                atomic_json(evidence_dir / f"{job['fingerprint']}.json", _record(job, result))
+                record = _record(job, result)
+                if job.get("cache_status") == "modified": _attach_diff(root, job, record)
+                atomic_json(evidence_dir / f"{job['fingerprint']}.json", record)
                 completed += 1
     # OCR and Whisper are deliberately serialized: loading several large models
     # usually makes a batch slower and can exhaust memory. Document extraction
     # still uses the full bounded process pool above.
     for job, path, kind in media:
         result = _media_job(path, kind, max_chars, model, max_seconds)
-        atomic_json(evidence_dir / f"{job['fingerprint']}.json", _record(job, result))
+        record = _record(job, result)
+        if job.get("cache_status") == "modified": _attach_diff(root, job, record)
+        atomic_json(evidence_dir / f"{job['fingerprint']}.json", record)
         completed += 1
     items = []
     for path in sorted(evidence_dir.glob("*.json")):

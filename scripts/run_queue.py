@@ -129,10 +129,19 @@ def merge_results(root: Path, run: Path) -> dict[str, Any]:
         entry = {key: result.get(key) for key in required | {"category", "analyzed_at"} if result.get(key) is not None}
         entry.update({"source": job["source"], "modified_at": datetime.fromtimestamp(job["mtime_ns"] / 1_000_000_000).astimezone().isoformat(timespec="seconds")})
         if not entry.get("analyzed_at"): entry["analyzed_at"] = result.get("completed_at") or now_iso()
+        previous = str(job.get("previous_fingerprint") or "")
+        if previous and previous != job["fingerprint"]:
+            intent["items"].pop(previous, None)
+            entry["supersedes"] = previous
         intent["items"][job["fingerprint"]] = entry; merged += 1
     intent["updated_at"] = now_iso(); atomic_json(intent_path, intent)
+    try:
+        from organizer import write_index
+        index_path = write_index(root, intent)
+    except Exception:
+        index_path = root / ".cache" / "file2intent.md"
     atomic_json(run / "merge.json", {"run_id": run.name, "merged": merged, "ignored": ignored, "merged_at": now_iso()})
-    return {"run_id": run.name, "merged": merged, "ignored": ignored, "intent_cache": str(intent_path)}
+    return {"run_id": run.name, "merged": merged, "ignored": ignored, "intent_cache": str(intent_path), "intent_index": str(index_path)}
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="可恢复的逐文件意图分析任务队列")
