@@ -11,7 +11,9 @@ def transcribe(path: Path, model_name: str, language: str | None, max_seconds: f
     try:
         from faster_whisper import WhisperModel
     except ImportError:
-        return result_record(path, "", "unavailable", "缺少 faster-whisper；请安装 requirements.txt。它通过 PyAV 解码，无需系统 FFmpeg")
+        result = result_record(path, "", "installation-required", "缺少 faster-whisper==1.2.1；必须先征得用户同意，才能安装依赖并在首次使用时下载模型")
+        result.update({"packages": ["faster-whisper==1.2.1"], "requires_user_confirmation": True, "model_download_may_be_required": True})
+        return result
     try:
         model = WhisperModel(model_name, device="cpu", compute_type="int8")
         segments, info = model.transcribe(str(path), language=language, vad_filter=True, beam_size=5)

@@ -11,6 +11,7 @@ from typing import Any
 
 from analyze_document import extract_text
 from common import now_iso
+from check_capabilities import check as check_capabilities
 from run_queue import atomic_json, latest_run, read_json
 
 DOCUMENT_SUFFIXES = {
@@ -73,6 +74,7 @@ def analyze_jobs(root: Path, run: Path, workers: int, max_chars: int, max_pages:
     jobs = [job for job in jobs if job.get("status") == "pending" and not (evidence_dir / f"{job.get('fingerprint')}.json").is_file()]
     documents: list[tuple[dict[str, Any], Path]] = []
     media: list[tuple[dict[str, Any], Path, str]] = []
+    media_candidates: list[Path] = []
     unavailable = 0
     for job in jobs:
         path = root / str(job.get("source", ""))
@@ -81,13 +83,22 @@ def analyze_jobs(root: Path, run: Path, workers: int, max_chars: int, max_pages:
             atomic_json(evidence_dir / f"{job['fingerprint']}.json", _record(job, {"method": "filename-only", "text": "", "error": None}))
         elif job.get("kind") == "file" and (suffix in DOCUMENT_SUFFIXES or path.name.lower() in {"makefile", "dockerfile", "cmakelists.txt"}):
             documents.append((job, path))
-        elif include_media and suffix in IMAGE_SUFFIXES:
-            media.append((job, path, "image"))
-        elif include_media and suffix in AUDIO_VIDEO_SUFFIXES:
-            media.append((job, path, "audio-video"))
+        elif suffix in IMAGE_SUFFIXES:
+            media_candidates.append(path)
+            if include_media:
+                media.append((job, path, "image"))
+        elif suffix in AUDIO_VIDEO_SUFFIXES:
+            media_candidates.append(path)
+            if include_media:
+                media.append((job, path, "audio-video"))
         else:
-            atomic_json(evidence_dir / f"{job['fingerprint']}.json", _record(job, {"method": "unavailable", "text": "", "error": "批处理器没有启用或不支持该格式"}))
+            atomic_json(evidence_dir / f"{job['fingerprint']}.json", _record(job, {"method": "unavailable", "text": "", "error": "批处理器不支持该格式"}))
             unavailable += 1
+    capability = check_capabilities(media_candidates) if media_candidates else {"status": "ready", "missing": [], "packages": [], "requires_user_confirmation": False}
+    if media_candidates and capability.get("requires_user_confirmation"):
+        return {"run_id": run.name, "status": "installation-required", "media_files": len(media_candidates), "capability": capability, "message": "缺少媒体分析能力。必须先询问用户是否安装，未获同意不得安装、下载模型、标记任务完成或继续请求移动确认。"}
+    if media_candidates and not include_media:
+        return {"run_id": run.name, "status": "media-analysis-confirmation-required", "media_files": len(media_candidates), "capability": capability, "message": "媒体工具已就绪，但必须先确认执行本地媒体分析；不得写入 unavailable 兜底。"}
     completed = 0
     if documents:
         with ProcessPoolExecutor(max_workers=max(1, workers)) as executor:
@@ -117,7 +128,7 @@ def analyze_jobs(root: Path, run: Path, workers: int, max_chars: int, max_pages:
         items.append({"fingerprint": item.get("fingerprint"), "source": item.get("source"), "method": item.get("method"), "characters": len(str(item.get("text") or "")), "evidence": path.name, "error": item.get("error")})
     index = {"version": 1, "run_id": run.name, "updated_at": now_iso(), "max_characters_per_file": max_chars, "items": items}
     atomic_json(run / "evidence-index.json", index)
-    return {"run_id": run.name, "workers": workers, "new_evidence": completed, "unavailable": unavailable, "total_evidence": len(items), "index": str(run / "evidence-index.json")}
+    return {"run_id": run.name, "status": "completed", "workers": workers, "new_evidence": completed, "unavailable": unavailable, "total_evidence": len(items), "index": str(run / "evidence-index.json")}
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="多进程提取紧凑文件证据；正文只落盘，不输出到终端")

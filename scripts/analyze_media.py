@@ -40,7 +40,11 @@ def main() -> int:
         result = dict(cache["items"][key]); result["cache_hit"] = True
     else:
         result = analyze(path, args.model, args.language, args.max_seconds); result["cache_hit"] = False
-        cache["items"][key] = result; cache["updated_at"] = now_iso(); write_json(cache_path, cache)
+        # Missing capabilities and runtime failures are not durable analysis
+        # results. Caching them would keep returning the fallback after tools
+        # are installed or a transient failure is fixed.
+        if result.get("method") not in {"unavailable", "installation-required", "unsupported"} and not result.get("error"):
+            cache["items"][key] = result; cache["updated_at"] = now_iso(); write_json(cache_path, cache)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

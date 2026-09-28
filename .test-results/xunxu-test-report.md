@@ -1,12 +1,12 @@
 # 循序（Xunxu）测试报告
 
-- 时间：2026-09-28T14:54:24+08:00
+- 时间：2026-09-28T15:37:47+08:00
 - 结果：通过
-- 总数：28
-- 通过：28
+- 总数：30
+- 通过：30
 - 失败：0
 - 跳过：0
-- 耗时：0.388 秒
+- 耗时：0.526 秒
 
 ## 用例
 
@@ -37,8 +37,10 @@
 | passed | test_failed_job_retries_then_stops (__main__.QueueTests) |
 | passed | test_queue_checkpoint_merge_and_resume (__main__.QueueTests) |
 | passed | test_stale_running_lease_is_recovered (__main__.QueueTests) |
+| passed | test_batch_stops_for_media_authorization_instead_of_unavailable_fallback (__main__.ReportAndMediaTests) |
 | passed | test_installers_and_archives_never_request_analysis (__main__.ReportAndMediaTests) |
 | passed | test_media_dependency_absence_is_safe_or_analyzer_returns_structure (__main__.ReportAndMediaTests) |
+| passed | test_missing_video_tool_requires_installation_authorization (__main__.ReportAndMediaTests) |
 | passed | test_static_report_file_details (__main__.ReportAndMediaTests) |
 
 ## 边界说明

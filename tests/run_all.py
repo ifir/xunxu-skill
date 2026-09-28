@@ -12,6 +12,7 @@ import tempfile
 import time
 import traceback
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -22,6 +23,7 @@ sys.path.insert(0, str(SCRIPTS))
 import analyze_media
 import analyze_document
 import analyze_batch
+import check_capabilities
 import install as skill_install
 import organizer
 import run_queue
@@ -242,6 +244,23 @@ class ReportAndMediaTests(Base):
         result = analyze_media.analyze(image, "small", None, 1)
         self.assertIn(result.get("method"), {"ocr", "unavailable"})
         self.assertIn("fingerprint", result)
+
+    def test_missing_video_tool_requires_installation_authorization(self) -> None:
+        video = write(self.root / "unknown.mp4", b"not real video")
+        with mock.patch.object(check_capabilities, "_module", return_value=False):
+            capability = check_capabilities.check([video])
+        self.assertEqual(capability["status"], "installation-required")
+        self.assertTrue(capability["requires_user_confirmation"]); self.assertIn("faster-whisper==1.2.1", capability["packages"])
+        self.assertIn("pip install faster-whisper==1.2.1", capability["install_commands"]["macos_linux"])
+
+    def test_batch_stops_for_media_authorization_instead_of_unavailable_fallback(self) -> None:
+        video = write(self.root / "abcdef1234567890.mp4", b"not real video")
+        configure(self.root, rename=True, trust=True); plan(self.root)
+        summary = run_queue.create_run(self.root, organizer.cache_path(self.root, ".organizer.analysis-required.json"), organizer.cache_path(self.root, ".organizer.config.json")); run = self.root / ".cache" / "runs" / summary["run_id"]
+        result = analyze_batch.analyze_jobs(self.root, run, 1, 1000, 3, False, "small", 10)
+        self.assertEqual(result["status"], "installation-required")
+        self.assertTrue(result["capability"]["requires_user_confirmation"])
+        self.assertFalse((run / "evidence" / f"{organizer.fingerprint(video, video.stat())}.json").exists())
 
     def test_installers_and_archives_never_request_analysis(self) -> None:
         write(self.root / "setup.dmg"); write(self.root / "bundle.zip")

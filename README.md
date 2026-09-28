@@ -109,7 +109,7 @@ PDF、OCR 和音视频转写的可选依赖统一固定在 [requirements.txt](re
 - OCR 使用 paddleocr 3.7.0，还需安装与设备匹配的 PaddlePaddle runtime。
 - 转写使用 faster-whisper 1.2.1，通过 PyAV 解码媒体，不要求系统安装 FFmpeg。
 - 首次转写通常需要下载模型权重；这是独立网络操作，应由用户明确授权。
-- 能力不可用时返回 unavailable 并保留原名，不凭空猜测。
+- 发现待识别视频但缺少工具时，代理会先说明需要安装的固定版本依赖及模型下载影响并征求同意；不会直接按 unavailable 跳过识别。用户拒绝安装后，可明确选择保留原名仅分类或暂时跳过。
 
 详细流程见 [references/intent-analysis.md](references/intent-analysis.md)。
 

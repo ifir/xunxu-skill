@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-28T14:54:24+08:00",
-  "elapsed_seconds": 0.388,
-  "total": 28,
+  "generated_at": "2026-09-28T15:37:47+08:00",
+  "elapsed_seconds": 0.526,
+  "total": 30,
   "counts": {
-    "passed": 28,
+    "passed": 30,
     "failed": 0,
     "error": 0,
     "skipped": 0
@@ -136,12 +136,22 @@
       "detail": ""
     },
     {
+      "name": "test_batch_stops_for_media_authorization_instead_of_unavailable_fallback (__main__.ReportAndMediaTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
       "name": "test_installers_and_archives_never_request_analysis (__main__.ReportAndMediaTests)",
       "status": "passed",
       "detail": ""
     },
     {
       "name": "test_media_dependency_absence_is_safe_or_analyzer_returns_structure (__main__.ReportAndMediaTests)",
+      "status": "passed",
+      "detail": ""
+    },
+    {
+      "name": "test_missing_video_tool_requires_installation_authorization (__main__.ReportAndMediaTests)",
       "status": "passed",
       "detail": ""
     },
