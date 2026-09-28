@@ -57,7 +57,7 @@ def _record(job: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         "method": result.get("method"), "text": result.get("text", ""),
         "error": result.get("error"), "extracted_at": now_iso(),
     }
-    for key in ("sample_strategy", "sampled_pages", "truncated", "frames", "duration_seconds", "requires_agent_vision", "fallback_reason", "transcription_method", "requires_user_confirmation", "tools"):
+    for key in ("sample_strategy", "sampled_pages", "truncated", "frames", "duration_seconds", "requires_agent_vision", "fallback_reason", "transcription_method", "requires_user_confirmation", "tools", "backend", "environment"):
         if key in result:
             record[key] = result[key]
     return record

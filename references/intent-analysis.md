@@ -24,7 +24,7 @@
 - PDF：先使用本机已有的 pdfinfo 获取页数并均匀选择最多 6 页，再让 pdftotext 逐页写入临时文件，绝不把全文直接输出到终端；不可用或无结果时回退固定版本 pypdf，以相同页码策略提取，并附加标题、主题、作者。返回 pdf-needs-ocr 时说明是扫描页或无文字层。扫描 PDF 需要跨平台 PDFium 渲染代表页后再调用 OCR，当前无渲染依赖时标记 unavailable，不得把 macOS Quick Look 作为核心逻辑。
 - 图片 OCR：scripts/ocr_image.py，使用 PaddleOCR。输出原始识别文字及指纹，不直接决定文件名。
 - 音频/视频语音转写：scripts/transcribe_media.py，使用 faster-whisper。它通过 PyAV 解码媒体，不要求系统安装 FFmpeg；默认只转写前 300 秒，可按需调整。
-- 视频关键帧兜底：scripts/extract_keyframes.py，依赖 PATH 中的 ffmpeg 与 ffprobe。只在音轨转写不可用、失败或无有效文本时调用，关键帧写入 `.cache/runs/<run-id>/keyframes/<fingerprint>/`，结果记录时间点和图片路径，并标记 requires_agent_vision=true；代理查看这些帧后才能形成意图，脚本本身不凭图片文件名下结论。
+- 视频关键帧兜底：scripts/extract_keyframes.py。先由 runtime_environment.py 判断执行模式，再按实际能力选择 PATH 中 ffmpeg+ffprobe、跨平台 Python imageio-ffmpeg，或仅限非沙箱 macOS 本机的 AVFoundation Swift 后端。不要把环境变量判断当成绝对事实，最终以工具实际探测和抽帧结果为准。关键帧结果记录后端、环境、时间点和图片路径，并标记 requires_agent_vision=true。
 - 能力预检：在处理待分析媒体前运行 `python3 scripts/check_capabilities.py <文件...>`。返回 installation-required 时先向用户列出缺少的固定版本依赖、安装命令，以及首次 Whisper 使用可能下载模型，然后询问是否允许安装和下载。用户明确同意后才能执行安装并重新运行预检；不得直接生成 unavailable 意图缓存。`analyze_media.py` 不缓存缺工具或执行失败的结果，因此安装后会重新分析。
 - 媒体入口与原始结果缓存：scripts/analyze_media.py。按扩展名路由到 OCR 或转写，并把未经总结的识别结果缓存在 .cache/.organizer.raw-analysis.json；相同文件指纹默认直接命中缓存。
 - 整理规划及执行：scripts/organizer.py。它不再承担 OCR 或转写，只消费整理意图缓存并负责预演、移动、改名、报告和状态校验。
@@ -55,12 +55,12 @@
 - 没有内容识别任务：requirements_status=not-needed，不提示安装。
 - 现有系统命令或 Python 包已覆盖本次格式：status=ready，不提示安装。
 - 图片可由代理视觉处理但本地 OCR 缺失：标记 conditional-only；只有视觉能力不可用或文字细节不足时再询问是否安装 PaddleOCR。
-- 视频没有 Whisper 但已有 ffmpeg+ffprobe：关键帧兜底可用，faster-whisper 不是必装项。若关键帧证据不足，再询问是否安装转写依赖。
+- 视频没有 Whisper 但已有任一关键帧后端：关键帧兜底可用，faster-whisper 不是必装项。沙箱或 Windows 缺少系统命令时，优先建议最小安装 `imageio-ffmpeg==0.6.0`；若关键帧证据不足，再询问是否安装转写依赖。
 - 只有部分依赖必要：提示固定版本最小包集合和最小安装命令，不建议安装完整 requirements.txt。
 - 本次所有 requirements.txt 依赖均必要：才可提示完整安装命令。任何安装或模型下载都需要用户明确授权。
 - Python 低于 3.10 且确需安装：先报告阻塞，征得同意后使用兼容解释器创建专用虚拟环境；不得直接向不兼容解释器安装。
 
-如果转写工具缺失但 FFmpeg 关键帧兜底可用，允许直接进入关键帧兜底；如果转写与关键帧两条路径都不可用，返回 installation-required 并暂停，主动询问用户是否安装，不能直接降级完成。如果用户拒绝，必须让用户明确选择“保留原名仅分类”或“暂时跳过”。只有格式不支持、文件损坏、加密，或两条路径都尝试后仍无可靠证据时，才可记录 unavailable 并保留原名称；不得凭空推断。
+如果转写工具缺失但任一关键帧后端可用，允许直接进入关键帧兜底；如果转写与关键帧所有路径都不可用，返回 installation-required 并暂停，主动询问用户是否安装，不能直接降级完成。如果用户拒绝，必须让用户明确选择“保留原名仅分类”或“暂时跳过”。只有格式不支持、文件损坏、加密，或两条路径都尝试后仍无可靠证据时，才可记录 unavailable 并保留原名称；不得凭空推断。
 
 ## 缓存格式
 

@@ -17,6 +17,7 @@ PINNED = {
     "pypdf": "pypdf==6.1.1",
     "faster_whisper": "faster-whisper==1.2.1",
     "paddleocr": "paddleocr==3.7.0",
+    "imageio_ffmpeg": "imageio-ffmpeg==0.6.0",
 }
 
 def _module(name: str) -> bool:
@@ -38,8 +39,12 @@ def required_capabilities(path: Path) -> list[str]:
     return []
 
 def check(paths: list[Path]) -> dict[str, Any]:
-    modules = {name: _module(name) for name in ("faster_whisper", "paddleocr", "paddle", "pypdf")}
-    commands = {name: shutil.which(name) for name in ("pdftotext", "pdfinfo", "ffmpeg", "ffprobe")}
+    modules = {name: _module(name) for name in ("faster_whisper", "paddleocr", "paddle", "pypdf", "imageio_ffmpeg")}
+    commands = {name: shutil.which(name) for name in ("pdftotext", "pdfinfo", "ffmpeg", "ffprobe", "swift")}
+    from runtime_environment import detect as detect_environment
+    environment = detect_environment()
+    native_avfoundation = environment["native_macos_frameworks_allowed"] and bool(commands["swift"])
+    keyframe_ready = bool((commands["ffmpeg"] and commands["ffprobe"]) or modules["imageio_ffmpeg"] or native_avfoundation)
     missing: set[str] = set()
     kinds: set[str] = set()
     for path in paths:
@@ -51,20 +56,23 @@ def check(paths: list[Path]) -> dict[str, Any]:
         elif suffix in IMAGE_SUFFIXES:
             kinds.add("image")
         for capability in required_capabilities(path):
-            if capability == "faster_whisper" and suffix in VIDEO_SUFFIXES and commands["ffmpeg"] and commands["ffprobe"]:
+            if capability == "faster_whisper" and suffix in VIDEO_SUFFIXES and keyframe_ready:
                 continue
             if capability == "pdf":
                 if not (commands["pdftotext"] or modules["pypdf"]): missing.add("pdf")
             elif not modules.get(capability):
                 missing.add(capability)
+        if suffix in VIDEO_SUFFIXES and not modules["faster_whisper"] and not keyframe_ready:
+            missing.discard("faster_whisper"); missing.add("keyframes")
     packages = []
     if "faster_whisper" in missing: packages.append("faster-whisper==1.2.1")
     if "paddleocr" in missing: packages.append("paddleocr==3.7.0")
     if "paddle" in missing: packages.append("与系统匹配的 PaddlePaddle runtime")
     if "pdf" in missing: packages.append("pypdf==6.1.1")
+    if "keyframes" in missing: packages.append("imageio-ffmpeg==0.6.0")
     video_present = "video" in kinds
     transcription_ready = modules["faster_whisper"]
-    keyframes_ready = bool(commands["ffmpeg"] and commands["ffprobe"])
+    keyframes_ready = keyframe_ready
     return {
         "status": "ready" if not missing else "installation-required",
         "media_kinds": sorted(kinds), "missing": sorted(missing), "packages": packages,
@@ -80,13 +88,17 @@ def check(paths: list[Path]) -> dict[str, Any]:
             "macos_linux": "python3 -m pip install faster-whisper==1.2.1" if "faster_whisper" in missing else "",
             "windows": "py -3 -m pip install faster-whisper==1.2.1" if "faster_whisper" in missing else "",
         },
-        "keyframe_install_hint": "安装包含 ffmpeg 与 ffprobe 的 FFmpeg 发行版，并确保命令位于 PATH" if video_present and not keyframes_ready else "",
+        "keyframe_install_hint": "安装跨平台 imageio-ffmpeg==0.6.0；或安装包含 ffmpeg 与 ffprobe 的 FFmpeg 发行版" if video_present and not keyframes_ready else "",
+        "environment": environment,
     }
 
 def assess_plan(paths: list[Path]) -> dict[str, Any]:
     """Assess only dependencies relevant to this plan; never install them."""
-    modules = {name: _module(name) for name in ("faster_whisper", "paddleocr", "paddle", "pypdf")}
-    commands = {name: shutil.which(name) for name in ("pdftotext", "pdfinfo", "ffmpeg", "ffprobe")}
+    modules = {name: _module(name) for name in ("faster_whisper", "paddleocr", "paddle", "pypdf", "imageio_ffmpeg")}
+    commands = {name: shutil.which(name) for name in ("pdftotext", "pdfinfo", "ffmpeg", "ffprobe", "swift")}
+    from runtime_environment import detect as detect_environment
+    environment = detect_environment()
+    keyframe_ready = bool((commands["ffmpeg"] and commands["ffprobe"]) or modules["imageio_ffmpeg"] or (environment["native_macos_frameworks_allowed"] and commands["swift"]))
     required: set[str] = set()
     conditional: set[str] = set()
     reasons: list[str] = []
@@ -95,10 +107,10 @@ def assess_plan(paths: list[Path]) -> dict[str, Any]:
         suffix = path.suffix.lower()
         if suffix in VIDEO_SUFFIXES:
             kinds["video"] = kinds.get("video", 0) + 1
-            if not modules["faster_whisper"] and not (commands["ffmpeg"] and commands["ffprobe"]):
-                required.add("faster_whisper"); reasons.append("待识别视频既无音轨转写能力，也无 FFmpeg 关键帧兜底")
+            if not modules["faster_whisper"] and not keyframe_ready:
+                required.add("imageio_ffmpeg"); reasons.append("待识别视频既无音轨转写能力，也无可用的本机或跨平台关键帧后端")
             elif not modules["faster_whisper"]:
-                reasons.append("视频可使用现有 FFmpeg 关键帧兜底，faster-whisper 不是本次必装项")
+                reasons.append("视频可使用现有关键帧后端兜底，faster-whisper 不是本次必装项")
         elif suffix in AUDIO_SUFFIXES:
             kinds["audio"] = kinds.get("audio", 0) + 1
             if not modules["faster_whisper"]:
@@ -139,7 +151,8 @@ def assess_plan(paths: list[Path]) -> dict[str, Any]:
         "python": {"executable": sys.executable, "version": platform.python_version(), "compatible": python_compatible, "minimum": "3.10", "virtual_environment": sys.prefix != getattr(sys, "base_prefix", sys.prefix)},
         "requirements_file": "requirements.txt", "requirements_status": requirements_status,
         "required_packages": required_packages, "conditional_packages": conditional_packages,
-        "external_tools": {"ffmpeg": commands["ffmpeg"], "ffprobe": commands["ffprobe"], "pdftotext": commands["pdftotext"], "pdfinfo": commands["pdfinfo"]},
+        "external_tools": {"ffmpeg": commands["ffmpeg"], "ffprobe": commands["ffprobe"], "swift": commands["swift"], "pdftotext": commands["pdftotext"], "pdfinfo": commands["pdfinfo"]},
+        "environment": environment, "keyframe_backend_available": keyframe_ready,
         "reasons": sorted(set(reasons)), "authorization_required": authorization_required,
         "model_download_may_be_required": "faster_whisper" in required,
         "recommended_install_scope": "full-requirements" if requirements_status == "full-install-required" else ("minimal-packages" if required_packages else "none"),

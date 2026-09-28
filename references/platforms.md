@@ -7,6 +7,7 @@
 - 生成名称同时遵守 Windows 的非法字符、末尾句点/空格和 `CON`、`NUL` 等保留设备名规则；这些名称在 macOS 上同样可用。
 - 缓存指纹使用文件大小、纳秒修改时间与首尾内容采样，不依赖 macOS inode 或 Windows file index，重命名/移动后可复用。
 - 图片 OCR 使用 PaddleOCR，音视频转写使用 faster-whisper/PyAV；两者均有 macOS、Windows 运行方式，但运行时、硬件和模型需由用户自行授权安装。
+- 视频抽帧会检测 local-host 与 sandboxed-or-remote 模式。本机 macOS 可使用随 Skill 分发的 AVFoundation Swift 快速路径；沙箱、Windows 和其它系统使用 Python imageio-ffmpeg 或 PATH 中的 FFmpeg。环境判断只是路由提示，能力必须以实际探测为准。
 - PDF 文本层由 `pypdf` 提取。扫描 PDF 需额外的 PDF 页面渲染器再交给 OCR；当前核心不会调用 macOS Quick Look、Finder、Windows Explorer 或 Office 自动化。
 
 ## 产品安装

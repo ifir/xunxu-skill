@@ -1,12 +1,12 @@
 # 循序（Xunxu）测试报告
 
-- 时间：2026-09-28T16:57:38+08:00
+- 时间：2026-09-28T19:33:07+08:00
 - 结果：通过
-- 总数：34
-- 通过：34
+- 总数：36
+- 通过：36
 - 失败：0
 - 跳过：0
-- 耗时：0.518 秒
+- 耗时：0.580 秒
 
 ## 用例
 
@@ -41,9 +41,11 @@
 | passed | test_batch_stops_for_media_authorization_instead_of_unavailable_fallback (__main__.ReportAndMediaTests) |
 | passed | test_installers_and_archives_never_request_analysis (__main__.ReportAndMediaTests) |
 | passed | test_keyframe_capability_is_valid_video_fallback (__main__.ReportAndMediaTests) |
+| passed | test_local_macos_can_use_avfoundation_backend (__main__.ReportAndMediaTests) |
 | passed | test_media_dependency_absence_is_safe_or_analyzer_returns_structure (__main__.ReportAndMediaTests) |
 | passed | test_missing_video_tool_requires_installation_authorization (__main__.ReportAndMediaTests) |
 | passed | test_plan_assessment_installs_only_required_package (__main__.ReportAndMediaTests) |
+| passed | test_sandbox_prefers_portable_python_keyframe_backend (__main__.ReportAndMediaTests) |
 | passed | test_static_report_file_details (__main__.ReportAndMediaTests) |
 | passed | test_video_falls_back_to_distributed_keyframes (__main__.ReportAndMediaTests) |
 

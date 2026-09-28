@@ -25,6 +25,7 @@ import analyze_document
 import analyze_batch
 import check_capabilities
 import extract_keyframes
+import runtime_environment
 import install as skill_install
 import organizer
 import run_queue
@@ -260,8 +261,8 @@ class ReportAndMediaTests(Base):
         with mock.patch.object(check_capabilities, "_module", return_value=False):
             capability = check_capabilities.check([video])
         self.assertEqual(capability["status"], "installation-required")
-        self.assertTrue(capability["requires_user_confirmation"]); self.assertIn("faster-whisper==1.2.1", capability["packages"])
-        self.assertIn("pip install faster-whisper==1.2.1", capability["install_commands"]["macos_linux"])
+        self.assertTrue(capability["requires_user_confirmation"]); self.assertIn("imageio-ffmpeg==0.6.0", capability["packages"])
+        self.assertIn("imageio-ffmpeg==0.6.0", capability["keyframe_install_hint"])
 
     def test_plan_assessment_installs_only_required_package(self) -> None:
         audio = write(self.root / "recording.mp3", b"audio")
@@ -281,6 +282,21 @@ class ReportAndMediaTests(Base):
         self.assertEqual(capability["status"], "ready")
         self.assertFalse(capability["video_pipeline"]["primary_ready"]); self.assertTrue(capability["video_pipeline"]["fallback_ready"])
         self.assertTrue(capability["video_pipeline"]["usable"])
+
+    def test_sandbox_prefers_portable_python_keyframe_backend(self) -> None:
+        environment = {"execution_mode": "sandboxed-or-remote", "host_os": "darwin", "machine": "arm64", "sandbox_signals": ["CODEX_SANDBOX"], "native_macos_frameworks_allowed": False, "portable_script_required": True}
+        def which(name): return "/usr/bin/swift" if name == "swift" else None
+        with mock.patch.object(extract_keyframes, "detect_environment", return_value=environment), mock.patch.object(extract_keyframes.shutil, "which", side_effect=which), mock.patch.object(extract_keyframes, "_imageio_ffmpeg", return_value="/python/ffmpeg"):
+            backend = extract_keyframes.select_backend()
+        self.assertEqual(backend["name"], "python-imageio-ffmpeg")
+        self.assertNotEqual(backend["name"], "macos-avfoundation")
+
+    def test_local_macos_can_use_avfoundation_backend(self) -> None:
+        environment = {"execution_mode": "local-host", "host_os": "darwin", "machine": "arm64", "sandbox_signals": [], "native_macos_frameworks_allowed": True, "portable_script_required": False}
+        def which(name): return "/usr/bin/swift" if name == "swift" else None
+        with mock.patch.object(extract_keyframes, "detect_environment", return_value=environment), mock.patch.object(extract_keyframes.shutil, "which", side_effect=which), mock.patch.object(extract_keyframes, "_imageio_ffmpeg", return_value=None), mock.patch.object(extract_keyframes.Path, "is_file", return_value=True):
+            backend = extract_keyframes.select_backend()
+        self.assertEqual(backend["name"], "macos-avfoundation")
 
     def test_video_falls_back_to_distributed_keyframes(self) -> None:
         video = write(self.root / "silent.mp4", b"video")
