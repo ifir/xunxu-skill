@@ -1,0 +1,4 @@
+# Optional local media-analysis dependencies. Install only when content analysis is requested.
+faster-whisper==1.2.1
+paddleocr==3.7.0
+# PaddleOCR requires a matching PaddlePaddle runtime; install the CPU/GPU build for the host separately.

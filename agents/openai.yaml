@@ -1,0 +1,6 @@
+interface:
+  display_name: "循序"
+  short_description: "按名称、内容与格式安全整理杂乱下载目录中的散落文件"
+  default_prompt: "使用 $xunxu 整理这个目录；先询问改名、已有目录和名称信任设置，私密名称未填写时默认无，再预演并让我确认。"
+policy:
+  allow_implicit_invocation: true
